@@ -1,0 +1,10 @@
+logs/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+/tmp/gnosis_upload_*.bin
