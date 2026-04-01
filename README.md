@@ -72,7 +72,7 @@ whether the first transfer after connect is significantly slower.
 
 ### `ramp` -- throughput vs. transfer size
 
-Per exit: downloads 100 KB, 1 MB, 10 MB, 100 MB with 60 s gaps.  A 60 s
+Per exit: downloads 50 KB, 500 KB, 5 MB, 50 MB with 60 s gaps.  A 60 s
 warmup precedes the first download.
 
 ```bash
@@ -81,7 +81,7 @@ python3 speedtest.py ramp
 
 Small transfers are dominated by TCP slow-start and tunnel setup overhead.
 This mode shows at what transfer size the tunnel reaches steady-state throughput.
-The 100 MB download has a 10-minute timeout.
+The 50 MB download has a 10-minute timeout.
 
 ### `gap` -- idle-gap degradation
 
@@ -134,7 +134,7 @@ All timing constants are near the top of `speedtest.py`:
 | `PAUSE_BETWEEN_LOCS_S` | 3 | Pause between exits |
 | `CONNECTION_TIMEOUT_S` | 60 | Max wait for VPN `Connected` state |
 | `CURL_MAX_TIME_S` | 60 | Hard timeout per curl transfer |
-| `RAMP_100MB_TIMEOUT_S` | 600 | Timeout for the 100 MB ramp download |
+| `RAMP_100MB_TIMEOUT_S` | 600 | Timeout for the 50 MB ramp download |
 | `REPEATED_COUNT` | 6 | Downloads in `repeated` mode |
 | `REPEATED_GAP_S` | 60 | Gap between `repeated` downloads |
 | `RAMP_GAP_S` | 60 | Gap between `ramp` sizes |

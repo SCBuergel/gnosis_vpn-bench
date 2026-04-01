@@ -7,7 +7,7 @@ each accessed via a CLI subcommand:
 
   locations  — baseline + per-exit upload/download/latency (N runs each)
   repeated   — 6 × 10 MB download per exit (first immediately, then 60 s gaps)
-  ramp       — download 100 KB → 1 MB → 10 MB → 100 MB per exit (60 s gaps)
+  ramp       — download 50 KB → 500 KB → 5 MB → 50 MB per exit (60 s gaps)
   gap        — 13 × 10 MB download with increasing pauses (0 s → 55 s)
 
 All modes share the same Cloudflare endpoint, VPN plumbing, and reporting
@@ -733,10 +733,10 @@ def cmd_repeated(args) -> None:
 # =========================================================================
 
 RAMP_SIZES: list[int] = [
-    100 * 1024,         # 100 KB
-    1 * 1024 * 1024,    # 1 MB
-    10 * 1024 * 1024,   # 10 MB
-    100 * 1024 * 1024,  # 100 MB
+    50 * 1024,          # 50 KB
+    500 * 1024,         # 500 KB
+    5 * 1024 * 1024,    # 5 MB
+    50 * 1024 * 1024,   # 50 MB
 ]
 RAMP_GAP_S: int = 60
 RAMP_100MB_TIMEOUT_S: int = 600  # 10 min for the 100 MB download
@@ -752,7 +752,7 @@ def cmd_ramp(args) -> None:
             time.sleep(RAMP_GAP_S)
             label = _size_label(size)
             url = cf_download_url(size)
-            timeout = RAMP_100MB_TIMEOUT_S if size >= 100 * 1024 * 1024 else CURL_MAX_TIME_S
+            timeout = RAMP_100MB_TIMEOUT_S if size >= 50 * 1024 * 1024 else CURL_MAX_TIME_S
             speed = run_cf_download(url, label, max_time_s=timeout)
             downloads.append({"size_bytes": size, "size_label": label, "speed_mbits": speed})
         return {"downloads": downloads}
@@ -837,7 +837,7 @@ def main() -> None:
 modes:
   locations   Baseline + per-exit upload/download/latency (N runs each)
   repeated    6 × 10 MB download per exit (immediately, then 60 s gaps)
-  ramp        Download 100 KB → 1 MB → 10 MB → 100 MB (60 s gaps)
+  ramp        Download 50 KB → 500 KB → 5 MB → 50 MB (60 s gaps)
   gap         13 × 10 MB download with increasing pauses (0 → 55 s)
 """,
     )
@@ -855,7 +855,7 @@ modes:
     p_rep.set_defaults(func=cmd_repeated)
 
     # -- ramp --
-    p_ramp = sub.add_parser("ramp", help="Download 100KB→1MB→10MB→100MB (60 s gaps)")
+    p_ramp = sub.add_parser("ramp", help="Download 50KB→500KB→5MB→50MB (60 s gaps)")
     p_ramp.set_defaults(func=cmd_ramp)
 
     # -- gap --
