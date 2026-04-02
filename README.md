@@ -24,6 +24,9 @@ python3 speedtest.py locations
 
 # Run a quick single-run sweep
 python3 speedtest.py locations --runs 1 --warmup 5 --wait 2
+
+# Stream results to a live JSON file (updated after every test)
+python3 speedtest.py -o live.json locations
 ```
 
 Output lands in `logs/`:
@@ -33,6 +36,10 @@ Output lands in `logs/`:
 | `speedtest_TIMESTAMP.log` | Full DEBUG-level trace of every command |
 | `report_{mode}_TIMESTAMP.txt` | Human-readable report (also printed to stdout) |
 | `results_{mode}_TIMESTAMP.json` | Machine-readable raw samples + computed stats |
+
+With `-o FILE`, a **live JSON file** is also written after every individual test
+completes.  This is useful for monitoring long runs or feeding results into a
+dashboard.  The file is written atomically (write-to-tmp + rename).
 
 ## Test modes
 

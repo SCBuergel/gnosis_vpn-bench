@@ -410,6 +410,22 @@ def _size_label(size_bytes: int) -> str:
     return f"{size_bytes / 1024:.0f}KB"
 
 
+def _write_json(path: Path, payload: dict) -> None:
+    """Atomically write *payload* as JSON to *path*."""
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    tmp.rename(path)
+
+
+def flush_live(live_file: Path | None, payload: dict) -> None:
+    """Write the current results dict to the live JSON file (if configured)."""
+    if live_file is None:
+        return
+    json_payload = {k: v for k, v in payload.items() if k != "_report"}
+    _write_json(live_file, json_payload)
+    log.debug("Live JSON updated: %s", live_file)
+
+
 def save_results(payload: dict, mode: str) -> None:
     report_file = LOG_DIR / f"report_{mode}_{_run_ts}.txt"
     results_file = LOG_DIR / f"results_{mode}_{_run_ts}.json"
@@ -419,7 +435,7 @@ def save_results(payload: dict, mode: str) -> None:
         report_file.write_text(report, encoding="utf-8")
         log.info("Report saved to %s", report_file)
     json_payload = {k: v for k, v in payload.items() if k != "_report"}
-    results_file.write_text(json.dumps(json_payload, indent=2, default=str), encoding="utf-8")
+    _write_json(results_file, json_payload)
     log.info("JSON saved to %s", results_file)
 
 
@@ -559,8 +575,17 @@ def render_locations_report(bl_samples, vpn_samples, bl_stats, vpn_stats,
     return "\n".join(L)
 
 
+def _locations_live_payload(n_runs, bl, bl_stats, vpn_samples, vpn_stats):
+    return {
+        "mode": "locations", "n_runs": n_runs,
+        "baseline": {"samples": bl, "stats": bl_stats},
+        "vpn": {"samples": vpn_samples, "stats": vpn_stats},
+    }
+
+
 def cmd_locations(args) -> None:
     n_runs, warmup_s, wait_s = args.runs, args.warmup, args.wait
+    live_file = Path(args.output) if args.output else None
     log.info("MODE: locations — %d runs, warmup=%ds, wait=%ds", n_runs, warmup_s, wait_s)
 
     destinations = get_destinations()
@@ -572,8 +597,11 @@ def cmd_locations(args) -> None:
     upload_file = create_upload_file()
 
     try:
-        bl = [run_baseline_single(upload_file, r, wait_s) for r in range(1, n_runs + 1)]
-        bl_stats = compute_locations_stats(bl)
+        bl: list[dict] = []
+        for r in range(1, n_runs + 1):
+            bl.append(run_baseline_single(upload_file, r, wait_s))
+            bl_stats = compute_locations_stats(bl)
+            flush_live(live_file, _locations_live_payload(n_runs, bl, bl_stats, [], []))
         time.sleep(PAUSE_BETWEEN_LOCS_S)
 
         vpn_samples: list[dict] = []
@@ -581,14 +609,16 @@ def cmd_locations(args) -> None:
             log.info("\n=== Location %d/%d: %s ===", i, len(destinations), dest["id"])
             for r in range(1, n_runs + 1):
                 vpn_samples.append(run_locations_single(dest, upload_file, r, warmup_s, wait_s))
+                loc_order = list(dict.fromkeys(s["location_id"] for s in vpn_samples))
+                vpn_stats = [compute_locations_stats(
+                    [s for s in vpn_samples if s["location_id"] == lid])
+                    for lid in loc_order]
+                flush_live(live_file, _locations_live_payload(
+                    n_runs, bl, bl_stats, vpn_samples, vpn_stats))
                 if r < n_runs:
                     time.sleep(PAUSE_BETWEEN_RUNS_S)
             if i < len(destinations):
                 time.sleep(PAUSE_BETWEEN_LOCS_S)
-
-        loc_order = list(dict.fromkeys(s["location_id"] for s in vpn_samples))
-        vpn_stats = [compute_locations_stats([s for s in vpn_samples if s["location_id"] == lid])
-                     for lid in loc_order]
 
         report = render_locations_report(bl, vpn_samples, bl_stats, vpn_stats,
                                          n_runs, warmup_s, wait_s)
@@ -611,7 +641,7 @@ REPEATED_COUNT: int = 6
 REPEATED_GAP_S: int = 60
 
 
-def _for_each_destination(mode_name: str, run_test):
+def _for_each_destination(mode_name: str, run_test, live_file: Path | None = None):
     """Iterate all VPN destinations: connect, probe, call run_test(), disconnect.
 
     *run_test(dest, ct, latency, colo)* performs the mode-specific work and
@@ -635,6 +665,7 @@ def _for_each_destination(mode_name: str, run_test):
             all_results.append({"location_id": loc_id, "location": dest["location"],
                                 "connect_time_s": None, "error": "connect_failed",
                                 "cf_colo": None, "downloads": []})
+            flush_live(live_file, {"mode": mode_name, "results": all_results})
             continue
 
         latency, colo = probe_latency_and_colo()
@@ -648,6 +679,7 @@ def _for_each_destination(mode_name: str, run_test):
         }
         result.update(extra)
         all_results.append(result)
+        flush_live(live_file, {"mode": mode_name, "results": all_results})
 
         if di < len(destinations):
             time.sleep(PAUSE_BETWEEN_LOCS_S)
@@ -692,6 +724,7 @@ def _render_per_location_report(title_lines: list[str], all_results: list[dict],
 
 
 def cmd_repeated(args) -> None:
+    live_file = Path(args.output) if args.output else None
     log.info("MODE: repeated — %d × 10 MB download, gap=%ds after first", REPEATED_COUNT, REPEATED_GAP_S)
 
     def run_test(dest, ct, latency, colo):
@@ -712,7 +745,7 @@ def cmd_repeated(args) -> None:
             "stdev": round(_stdev(speeds), 2) if speeds else None,
         }
 
-    all_results = _for_each_destination("repeated", run_test)
+    all_results = _for_each_destination("repeated", run_test, live_file=live_file)
 
     report = _render_per_location_report(
         title_lines=[
@@ -743,6 +776,7 @@ RAMP_100MB_TIMEOUT_S: int = 600  # 10 min for the 100 MB download
 
 
 def cmd_ramp(args) -> None:
+    live_file = Path(args.output) if args.output else None
     log.info("MODE: ramp — sizes %s, gap=%ds", [_size_label(s) for s in RAMP_SIZES], RAMP_GAP_S)
 
     def run_test(dest, ct, latency, colo):
@@ -757,7 +791,7 @@ def cmd_ramp(args) -> None:
             downloads.append({"size_bytes": size, "size_label": label, "speed_mbits": speed})
         return {"downloads": downloads}
 
-    all_results = _for_each_destination("ramp", run_test)
+    all_results = _for_each_destination("ramp", run_test, live_file=live_file)
 
     report = _render_per_location_report(
         title_lines=[
@@ -787,6 +821,7 @@ GAP_SCHEDULE: list[int] = [0, 0, 5] + list(range(10, 60, 5))  # 13 entries
 
 
 def cmd_gap(args) -> None:
+    live_file = Path(args.output) if args.output else None
     log.info("MODE: gap — %d downloads, warmup=%ds, gaps=%s",
              len(GAP_SCHEDULE), GAP_WARMUP_S, GAP_SCHEDULE)
 
@@ -809,7 +844,7 @@ def cmd_gap(args) -> None:
             "stdev": round(_stdev(speeds), 2) if speeds else None,
         }
 
-    all_results = _for_each_destination("gap", run_test)
+    all_results = _for_each_destination("gap", run_test, live_file=live_file)
 
     report = _render_per_location_report(
         title_lines=[
@@ -841,7 +876,9 @@ modes:
   gap         13 × 10 MB download with increasing pauses (0 → 55 s)
 """,
     )
-    sub = parser.add_subparsers(dest="mode", required=True)
+    parser.add_argument("-o", "--output", metavar="FILE",
+                        help="Write live JSON results to FILE (updated after every test)")
+    sub = parser.add_subparsers(dest="mode")
 
     # -- locations --
     p_loc = sub.add_parser("locations", help="Full location benchmark (baseline + VPN exits)")
@@ -863,6 +900,9 @@ modes:
     p_gap.set_defaults(func=cmd_gap)
 
     args = parser.parse_args()
+    if args.mode is None:
+        parser.print_help()
+        sys.exit(0)
     log.info("Gnosis VPN Speed Tester — mode: %s — log: %s", args.mode, LOG_FILE)
     args.func(args)
     log.info("Done.")
