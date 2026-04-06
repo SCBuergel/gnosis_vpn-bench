@@ -1,5 +1,7 @@
 # Gnosis VPN Speed Tester
 
+_Last changed: 2026-04-06_
+
 Automated throughput and latency benchmarking for Gnosis VPN tunnels.
 Connects to each configured exit in turn, runs downloads/uploads against
 Cloudflare's anycast speed-test endpoint, and writes structured results
