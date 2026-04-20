@@ -83,17 +83,24 @@ def get_connection_state(location_id: str) -> str:
     status = get_raw_status()
     if not status:
         return "Unknown"
-    for entry in status.get("Status", {}).get("destinations", []):
-        if entry["destination"]["id"] == location_id:
-            return _parse_state(entry.get("connection_state", "None"))
-    return "Unknown"
+    s = status.get("Status", {})
+    connected = s.get("connected")
+    if connected and connected.get("destination_id") == location_id:
+        return "Connected"
+    connecting = s.get("connecting")
+    if connecting and connecting.get("destination_id") == location_id:
+        return "Connecting"
+    for entry in s.get("disconnecting", []):
+        if entry.get("destination_id") == location_id:
+            return "Disconnecting"
+    return "None"
 
 
 # ---------------------------------------------------------------------------
 # VPN connect / disconnect
 # ---------------------------------------------------------------------------
 
-_NOT_CONNECTED = {"none", "connecting", "unknown"}
+_NOT_CONNECTED = {"none", "connecting", "disconnecting", "unknown"}
 
 
 def wait_for_connection(location_id: str, timeout_s: int = CONNECTION_TIMEOUT_S) -> float | None:
