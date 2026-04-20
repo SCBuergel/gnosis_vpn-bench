@@ -137,7 +137,7 @@ def _run_baseline_single(upload_file: str, run_number: int, wait_s: int) -> dict
     time.sleep(wait_s)
     sample["download_mbits"] = run_cf_download(CF_DL_10MB, "10MB")
     time.sleep(wait_s)
-    sample["download_100mb_mbits"] = run_cf_download(CF_DL_100MB, "100MB")
+    sample["download_100mb_mbits"] = run_cf_download(CF_DL_100MB, "90MB")
     time.sleep(wait_s)
     sample["upload_mbits"] = run_cf_upload(upload_file)
     return sample
@@ -207,23 +207,23 @@ def _render_locations_report(bl_samples, vpn_samples, bl_stats, vpn_stats,
 
     L.append("=" * 90)
     L.append(f"  GNOSIS VPN SPEED TEST [locations]  —  {now}  ({n_runs} runs/location)")
-    L.append(f"  Endpoint: Cloudflare anycast  |  DL: 10 MB  |  Baseline DL: +100 MB  |  UL: 10 MB")
+    L.append(f"  Endpoint: Cloudflare anycast  |  DL: 10 MB  |  Baseline DL: +90 MB  |  UL: 10 MB")
     L.append(f"  Warmup: {warmup_s}s  |  wait: {wait_s}s  |  log: {LOG_FILE}")
     L.append("=" * 90)
 
     # baseline raw
     L.append("\nBASELINE (no VPN)")
-    hdr = f"{'Run':>4}  {'PoP':>4}  {'Lat(ms)':>8}  {'DL 10MB':>9}  {'DL 100MB':>10}  {'UL':>8}  Status"
+    hdr = f"{'Run':>4}  {'PoP':>4}  {'Lat(ms)':>8}  {'DL 10MB':>9}  {'DL 90MB':>9}  {'UL':>8}  Status"
     L += ["─" * len(hdr), hdr, "─" * len(hdr)]
     for s in bl_samples:
         st = f"ERR:{s['error']}" if s["error"] else "ok"
         L.append(f"{s['run']:>4}  {_col(s.get('cf_colo'),4)}  {_col(s['latency_ms'],8,1)}"
-                 f"  {_col(s['download_mbits'],9)}  {_col(s.get('download_100mb_mbits'),10)}"
+                 f"  {_col(s['download_mbits'],9)}  {_col(s.get('download_100mb_mbits'),9)}"
                  f"  {_col(s['upload_mbits'],8)}  {st}")
     bs = bl_stats
     c = ",".join(bs["cf_colos_unique"]) or "N/A"
     L.append(f"\n  Summary ({bs['n_complete']}/{bs['n_total']}): PoP={c}  lat={_fmt_ms(bs['latencies'])}ms"
-             f"  dl10={_fmt_mbit(bs['downloads'])}  dl100={_fmt_mbit(bs['downloads_100mb'])}"
+             f"  dl10={_fmt_mbit(bs['downloads'])}  dl90={_fmt_mbit(bs['downloads_100mb'])}"
              f"  ul={_fmt_mbit(bs['uploads'])} Mbit/s")
 
     # vpn raw

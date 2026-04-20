@@ -25,7 +25,7 @@ POLL_INTERVAL_S: float = 1.0
 
 CF_DL_URL_FMT: str = "https://speed.cloudflare.com/__down?bytes={}"
 CF_DL_10MB:    str = CF_DL_URL_FMT.format(10 * 1024 * 1024)
-CF_DL_100MB:   str = CF_DL_URL_FMT.format(100 * 1024 * 1024)
+CF_DL_100MB:   str = CF_DL_URL_FMT.format(90 * 1024 * 1024)
 CF_UPLOAD:     str = "https://speed.cloudflare.com/__up"
 CF_PROBE:      str = CF_DL_URL_FMT.format(1)
 
