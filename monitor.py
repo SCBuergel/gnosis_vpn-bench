@@ -52,19 +52,28 @@ OUTPUT_DIR = SCRIPT_DIR / "output"
 # ---------------------------------------------------------------------------
 # Recording defaults
 # ---------------------------------------------------------------------------
+#
+# Default output paths embed a process-start timestamp ("ping--YYYY-MM-DD
+# --HH-MM-SS.txt") so re-running a recorder never silently overwrites the
+# previous session's data. The timestamp is computed once at import time
+# so every default produced in one invocation shares it — handy for
+# `ping-load`, where the ping recording and the speed file should carry
+# the same session stamp.
+
+_RUN_TS = datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
 
 DEFAULT_PING_HOST = "google.com"
 DEFAULT_CURL_URL = (
     "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.0.5.tar.xz"
 )
-DEFAULT_PING_FILE = str(DATA_DIR / "ping.txt")
-DEFAULT_CURL_FILE = str(DATA_DIR / "curl.txt")
+DEFAULT_PING_FILE = str(DATA_DIR / f"ping--{_RUN_TS}.txt")
+DEFAULT_CURL_FILE = str(DATA_DIR / f"curl--{_RUN_TS}.txt")
 
-# ping-load defaults: speed.txt is the shared, append-only file that
+# ping-load: speed--TS.txt is the shared, append-only file that
 # accumulates every curl burst's progress meter; pingload's curl URL
 # defaults to Cloudflare's 10 MB anycast endpoint so the bench's existing
 # downstream tooling agrees on the payload size.
-DEFAULT_SPEED_FILE = str(DATA_DIR / "speed.txt")
+DEFAULT_SPEED_FILE = str(DATA_DIR / f"speed--{_RUN_TS}.txt")
 DEFAULT_PING_LOAD_INTERVAL_MIN = 30
 DEFAULT_PING_LOAD_CURL_URL = (
     "https://speed.cloudflare.com/__down?bytes=10485760"  # 10 MB

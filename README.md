@@ -102,6 +102,124 @@ python3 speedtest.py gap
 Tests whether idle periods cause the tunnel to degrade (e.g. congestion-window
 decay, session teardown, or path re-routing).
 
+## Monitor recordings & continuous tests
+
+Alongside the location-sweep benchmarks, `speedtest.py` exposes the
+recording / plotting subcommands that originated in
+[`gnosis_vpn-monitor`](https://github.com/SCBuergel/gnosis_vpn-monitor),
+plus a new `ping-load` mode that combines them:
+
+```
+python3 speedtest.py ping  [HOST]   # record ping latency
+python3 speedtest.py curl  [URL]    # record curl throughput
+python3 speedtest.py plot  FILE…    # render an SVG/PNG chart
+python3 speedtest.py ping-load      # ping continuously + 10 MB curl burst every N min
+```
+
+Recordings land in `./data/`, plots in `./output/` (both resolved
+relative to the script and created on demand). Default filenames embed
+the start timestamp — `ping--2026-05-11--23-57-47.txt` — so re-running
+a recorder never silently overwrites the previous session's data.
+
+### `ping` — latency recorder
+
+```bash
+python3 speedtest.py ping                      # default host: google.com
+python3 speedtest.py ping example.org          # custom host
+python3 speedtest.py ping example.org -o run.txt
+```
+
+Spawns a fresh `ping -c 1 -W 1 -D <host>` per second rather than letting
+a single long-running ping stream samples — that defeats the kernel /
+intermediate-hop path caching that would otherwise bias VPN
+measurements toward the hot path. Output is teed to stdout and to
+`data/ping--TIMESTAMP.txt`. Stop with Ctrl-C. Pass `-o ''` to record to
+stdout only.
+
+### `curl` — throughput recorder
+
+```bash
+python3 speedtest.py curl                      # default URL: kernel.org tarball
+python3 speedtest.py curl https://example.com/big.bin
+```
+
+Runs `curl -o /dev/null <url>` and timestamps each progress update.
+Output is teed to stdout and to `data/curl--TIMESTAMP.txt`. The
+recording ends when the download finishes or you Ctrl-C.
+
+### `ping-load` — continuous ping with periodic load bursts
+
+```bash
+python3 speedtest.py ping-load                   # 30-min interval (default)
+python3 speedtest.py ping-load --interval 10     # 10-min interval
+python3 speedtest.py ping-load --host 1.1.1.1 --interval 15
+```
+
+Runs `ping` continuously in a background thread (writing to
+`data/ping--TIMESTAMP.txt`) and, every `--interval` minutes, fires a
+single 10 MB curl burst whose progress meter is **appended** to
+`data/speed--TIMESTAMP.txt`. The speed file gets no separator/blank
+lines between bursts, so the same file accumulates the speed samples
+from every burst contiguously, and `plot --double-y` consumes it
+directly:
+
+```bash
+python3 speedtest.py plot --double-y \
+    data/ping--2026-05-11--23-57-47.txt \
+    data/speed--2026-05-11--23-57-47.txt
+```
+
+That gives you ping latency and burst throughput on one chart from two
+files — exactly the workflow this mode exists for. Each `ping-load`
+session shares one timestamp across both files, so the pair is easy to
+spot.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--host` | `google.com` | Ping target |
+| `--url` | Cloudflare 10 MB anycast | URL fetched on each burst |
+| `--interval` | `30` | Minutes between curl bursts |
+| `--ping-output` | `data/ping--TIMESTAMP.txt` | Ping recording path |
+| `--speed-output` | `data/speed--TIMESTAMP.txt` | Burst speed log (append-only) |
+
+### `plot` — render a chart
+
+```bash
+python3 speedtest.py plot data/ping--TIMESTAMP.txt
+python3 speedtest.py plot data/curl--TIMESTAMP.txt
+python3 speedtest.py plot --double-y data/ping--TS.txt data/speed--TS.txt
+```
+
+The recording's kind (ping vs. curl) is auto-detected from its content.
+With no `-o` the chart is written under `output/` with a timestamped
+filename plus a sibling PNG (requires `rsvg-convert`, ImageMagick or
+Inkscape on `PATH`; falls back to SVG-only if none is found). Two files
+of the same kind share one y-axis; `--double-y` plots ping vs. curl on
+independent left/right axes. `--log-y`, `--style` (matplotlib-style
+format strings like `xb`, `o-r`, `.--g`), `--legend`, `--width`,
+`--height`, `--png-scale` are also accepted — see
+`speedtest.py plot --help` for the full list.
+
+### Recording file format
+
+One timestamped sample per line:
+
+```
+[1778315104.443890] 64 bytes from ... time=177 ms
+[1778315105.426565] 64 bytes from ... time=352 ms
+```
+
+…or for curl:
+
+```
+[1778315901.123456]   0  149M    0  111k    0     0  84162  ...  84137
+```
+
+Headers, banners and other non-data lines are tolerated and skipped
+during parsing — so `ping-load`'s speed file (which contains a fresh
+curl banner before each burst) parses with the same code path as a
+single-burst recording.
+
 ## How it works
 
 All modes use **Cloudflare anycast** (`speed.cloudflare.com`):
