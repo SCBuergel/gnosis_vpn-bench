@@ -20,6 +20,13 @@ import sys
 
 from config import DEFAULT_RUNS, DEFAULT_WARMUP_S, DEFAULT_WAIT_BETWEEN_S, LOG_DIR, LOG_FILE
 from modes import cmd_gap, cmd_locations, cmd_ramp, cmd_repeated
+from monitor import (
+    DEFAULT_CURL_FILE, DEFAULT_CURL_URL,
+    DEFAULT_HEIGHT, DEFAULT_PING_FILE, DEFAULT_PING_HOST,
+    DEFAULT_PING_LOAD_CURL_URL, DEFAULT_PING_LOAD_INTERVAL_MIN,
+    DEFAULT_SPEED_FILE, DEFAULT_WIDTH,
+    cmd_curl, cmd_ping, cmd_ping_load, cmd_plot,
+)
 
 # ---------------------------------------------------------------------------
 # Logging — must be configured before any other module emits log records
@@ -53,6 +60,10 @@ modes:
   repeated    6 × 10 MB download per exit (immediately, then 60 s gaps)
   ramp        Download 50 KB → 500 KB → 5 MB → 50 MB (60 s gaps)
   gap         13 × 10 MB download with increasing pauses (0 → 55 s)
+  ping        Record ping latency to a host (one sample/sec)
+  curl        Record curl download throughput
+  plot        Render an SVG/PNG chart from one or two recordings
+  ping-load   Continuous ping + periodic 10 MB curl bursts
 """,
     )
     parser.add_argument("-o", "--output", metavar="FILE",
@@ -73,6 +84,87 @@ modes:
 
     p_gap = sub.add_parser("gap", help="13 × 10 MB with increasing pauses (0→55 s)")
     p_gap.set_defaults(func=cmd_gap)
+
+    # ---- monitor recording / plotting (ported from gnosis_vpn-monitor) ----
+
+    p_ping = sub.add_parser(
+        "ping",
+        help="record ping latency to a host (one sample/sec)",
+        description="Record `ping -D <host>` to stdout and a file.",
+    )
+    p_ping.add_argument("host", nargs="?", default=DEFAULT_PING_HOST,
+                        help=f"host to ping (default: {DEFAULT_PING_HOST})")
+    p_ping.add_argument("-o", "--output", default=DEFAULT_PING_FILE,
+                        help=f"copy of the trace (default: {DEFAULT_PING_FILE}; "
+                             f"pass '' to skip the file copy)")
+    p_ping.set_defaults(func=cmd_ping)
+
+    p_curl = sub.add_parser(
+        "curl",
+        help="record curl download throughput",
+        description="Download a URL with curl and record its progress meter.",
+    )
+    p_curl.add_argument("url", nargs="?", default=DEFAULT_CURL_URL,
+                        help=f"URL to download (default: {DEFAULT_CURL_URL})")
+    p_curl.add_argument("-o", "--output", default=DEFAULT_CURL_FILE,
+                        help=f"copy of the trace (default: {DEFAULT_CURL_FILE}; "
+                             f"pass '' to skip the file copy)")
+    p_curl.set_defaults(func=cmd_curl)
+
+    p_plot = sub.add_parser(
+        "plot",
+        help="render an SVG/PNG chart from one or two recordings",
+        description="Render an SVG line chart from a ping or curl recording.",
+    )
+    p_plot.add_argument("files", nargs="+",
+                        help="one recording file, or two (same kind → shared "
+                             "y-axis; with --double-y → independent axes)")
+    p_plot.add_argument("--double-y", action="store_true",
+                        help="independent left/right y-axes (for ping+curl)")
+    p_plot.add_argument("--log-y", action="store_true",
+                        help="logarithmic y-axis")
+    p_plot.add_argument("-o", "--output", default=None,
+                        help="SVG path. Default: output/{ping,curl,combined}-"
+                             "YYYY-MM-DD--HH-MM-SS.svg with a sibling .png. "
+                             "Pass '-' to write SVG to stdout.")
+    p_plot.add_argument("--width", type=int, default=DEFAULT_WIDTH,
+                        help=f"SVG width in pixels (default: {DEFAULT_WIDTH})")
+    p_plot.add_argument("--height", type=int, default=DEFAULT_HEIGHT,
+                        help=f"SVG height in pixels (default: {DEFAULT_HEIGHT})")
+    p_plot.add_argument("--png-scale", type=float, default=1.0,
+                        help="PNG dimension multiplier (default: 1.0)")
+    p_plot.add_argument("--style", action="append", default=None, metavar="STYLE",
+                        help="matplotlib-style format string per series "
+                             "(e.g. --style xb --style or)")
+    p_plot.add_argument("--legend", action="append", default=None, metavar="LABEL",
+                        help="legend entry per series")
+    p_plot.set_defaults(func=cmd_plot)
+
+    p_pl = sub.add_parser(
+        "ping-load",
+        help="continuous ping + a 10 MB curl burst every N minutes",
+        description="Run ping continuously while firing a periodic 10 MB curl "
+                    "download. Ping samples go to --ping-output (truncated at "
+                    "start). Each burst's curl progress is appended to "
+                    "--speed-output, with no separator lines between bursts, "
+                    "so the two files can be plotted together via "
+                    "`plot --double-y`.",
+    )
+    p_pl.add_argument("--host", default=DEFAULT_PING_HOST,
+                      help=f"ping host (default: {DEFAULT_PING_HOST})")
+    p_pl.add_argument("--url", default=DEFAULT_PING_LOAD_CURL_URL,
+                      help=f"curl URL for each burst "
+                           f"(default: {DEFAULT_PING_LOAD_CURL_URL})")
+    p_pl.add_argument("--interval", type=int,
+                      default=DEFAULT_PING_LOAD_INTERVAL_MIN,
+                      help=f"minutes between curl bursts "
+                           f"(default: {DEFAULT_PING_LOAD_INTERVAL_MIN})")
+    p_pl.add_argument("--ping-output", default=DEFAULT_PING_FILE,
+                      help=f"ping recording path (default: {DEFAULT_PING_FILE})")
+    p_pl.add_argument("--speed-output", default=DEFAULT_SPEED_FILE,
+                      help=f"curl-burst recording path, append-only "
+                           f"(default: {DEFAULT_SPEED_FILE})")
+    p_pl.set_defaults(func=cmd_ping_load)
 
     args = parser.parse_args()
     if args.mode is None:
