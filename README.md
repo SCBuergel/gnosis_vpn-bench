@@ -160,13 +160,12 @@ Runs `ping` continuously in a background thread (writing to
 single 10 MB curl burst whose progress meter is **appended** to
 `data/speed--TIMESTAMP.txt`. The speed file gets no separator/blank
 lines between bursts, so the same file accumulates the speed samples
-from every burst contiguously, and `plot --double-y` consumes it
-directly:
+from every burst contiguously, and `plot` consumes the pair directly:
 
 ```bash
-./gnosis_vpn-bench plot --double-y \
+./gnosis_vpn-bench plot \
     data/ping--2026-05-11--23-57-47.txt \
-    data/speed--2026-05-11--23-57-47.txt
+    --right data/speed--2026-05-11--23-57-47.txt
 ```
 
 That gives you ping latency and burst throughput on one chart from two
@@ -184,20 +183,36 @@ spot.
 
 ### `plot` — render a chart
 
+Positional files go on the **left** y-axis by default; `--right`
+(repeatable) opens a second y-axis. Both `--left` and `--right` may be
+passed any number of times, so any (N, M) split is expressible:
+
 ```bash
-./gnosis_vpn-bench plot data/ping--TIMESTAMP.txt
-./gnosis_vpn-bench plot data/curl--TIMESTAMP.txt
-./gnosis_vpn-bench plot --double-y data/ping--TS.txt data/speed--TS.txt
+# 1 file → single y-axis
+./gnosis_vpn-bench plot data/ping--TS.txt
+
+# Multiple same-kind files share the left axis (each gets its own colour)
+./gnosis_vpn-bench plot data/ping-before.txt data/ping-after.txt
+
+# Independent left/right axes — the canonical ping+curl combined chart
+./gnosis_vpn-bench plot data/ping--TS.txt --right data/speed--TS.txt
+
+# Several files per side, fully explicit
+./gnosis_vpn-bench plot \
+    --left data/ping-a.txt --left data/ping-b.txt \
+    --right data/curl-a.txt --right data/curl-b.txt
 ```
 
-The recording's kind (ping vs. curl) is auto-detected from its content.
+All files on the same axis must be the same kind (so the axis labels a
+single unit); mixing ping and curl is what `--right` is for. The
+recording kind is auto-detected from each file's contents.
+
 With no `-o` the chart is written under `output/` with a timestamped
 filename plus a sibling PNG (requires `rsvg-convert`, ImageMagick or
-Inkscape on `PATH`; falls back to SVG-only if none is found). Two files
-of the same kind share one y-axis; `--double-y` plots ping vs. curl on
-independent left/right axes. `--log-y`, `--style` (matplotlib-style
-format strings like `xb`, `o-r`, `.--g`), `--legend`, `--width`,
-`--height`, `--png-scale` are also accepted — see
+Inkscape on `PATH`; falls back to SVG-only if none is found). `--log-y`,
+`--style` (matplotlib-style format strings like `xb`, `o-r`, `.--g`,
+repeated once per series in left-then-right order), `--legend`,
+`--width`, `--height`, `--png-scale` are also accepted — see
 `./gnosis_vpn-bench plot --help` for the full list.
 
 ### Recording file format

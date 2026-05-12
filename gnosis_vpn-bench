@@ -113,16 +113,24 @@ modes:
 
     p_plot = sub.add_parser(
         "plot",
-        help="render an SVG/PNG chart from one or two recordings",
-        description="Render an SVG line chart from a ping or curl recording.",
+        help="render an SVG/PNG chart from one or more recordings",
+        description="Render an SVG line chart from ping/curl recordings. "
+                    "Positional files default to the left y-axis; pass "
+                    "--right (repeatable) to add a second y-axis.",
     )
-    p_plot.add_argument("files", nargs="+",
-                        help="one recording file, or two (same kind → shared "
-                             "y-axis; with --double-y → independent axes)")
-    p_plot.add_argument("--double-y", action="store_true",
-                        help="independent left/right y-axes (for ping+curl)")
+    p_plot.add_argument("files", nargs="*",
+                        help="recording files for the left y-axis (shorthand "
+                             "for --left). All same-kind files share the axis.")
+    p_plot.add_argument("--left", action="append", metavar="FILE",
+                        help="add a file to the left y-axis (repeatable). "
+                             "All left-axis files must be the same kind "
+                             "(ping or curl).")
+    p_plot.add_argument("--right", action="append", metavar="FILE",
+                        help="add a file to the right y-axis (repeatable). "
+                             "Presence of --right makes the chart double-y; "
+                             "all right-axis files must be the same kind.")
     p_plot.add_argument("--log-y", action="store_true",
-                        help="logarithmic y-axis")
+                        help="logarithmic y-axis (applies to both sides)")
     p_plot.add_argument("-o", "--output", default=None,
                         help="SVG path. Default: output/{ping,curl,combined}-"
                              "YYYY-MM-DD--HH-MM-SS.svg with a sibling .png. "

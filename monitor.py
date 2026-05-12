@@ -396,15 +396,39 @@ MARGIN_BOTTOM = 50
 FONT_SIZE = 14
 STROKE_WIDTH = 3
 
-DEFAULT_STYLES_SINGLE = ["xb"]
-DEFAULT_STYLES_DOUBLE_Y = ["xb", "xr"]
-DEFAULT_STYLES_SHARED_Y = ["xb", "or"]
+# Default --style values per chart shape. Hand-picked for the small
+# cases so the canonical 1-series and 2-series charts look identical to
+# the original tool; longer cycles kick in once N+M > 2.
+#
+# Same-axis defaults rotate marker too (x → o → +), since multiple
+# series sharing one y-scale benefit from shape disambiguation when
+# samples overlap. Cross-axis defaults stick with the "x" marker per
+# series and just rotate colour — readers separate the two sides by
+# spine/label colour rather than glyph.
+
+DEFAULT_SINGLE_AXIS_STYLES = ["xb", "or", "xg", "oc", "+m", "sy", "Dk"]
+LEFT_AXIS_COLOR_CYCLE = ["b", "g", "c", "m"]
+RIGHT_AXIS_COLOR_CYCLE = ["r", "y", "k"]
 
 
-def default_styles(num_series, double_y):
-    if num_series == 1:
-        return DEFAULT_STYLES_SINGLE
-    return DEFAULT_STYLES_DOUBLE_Y if double_y else DEFAULT_STYLES_SHARED_Y
+def default_styles_for_axes(n_left, n_right):
+    """Return one style string per series in left-then-right order.
+
+    Special-cases the historical 1-series and 1+1 charts so their look
+    is preserved exactly; falls back to the cycles above for larger N+M.
+    """
+    if n_right == 0:
+        if n_left == 1:
+            return ["xb"]
+        return [DEFAULT_SINGLE_AXIS_STYLES[i % len(DEFAULT_SINGLE_AXIS_STYLES)]
+                for i in range(n_left)]
+    if n_left == 1 and n_right == 1:
+        return ["xb", "xr"]
+    left = [f"x{LEFT_AXIS_COLOR_CYCLE[i % len(LEFT_AXIS_COLOR_CYCLE)]}"
+            for i in range(n_left)]
+    right = [f"x{RIGHT_AXIS_COLOR_CYCLE[i % len(RIGHT_AXIS_COLOR_CYCLE)]}"
+             for i in range(n_right)]
+    return left + right
 
 
 class Plot:
@@ -636,20 +660,57 @@ class Plot:
         return out
 
 
-def render(series_list, log_y=False, double_y=False,
+def render(left_series, right_series, log_y=False,
            width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT,
            styles=None, labels=None):
-    if not 1 <= len(series_list) <= 2:
-        raise ValueError("render expects 1 or 2 series")
+    """Render N left-axis + M right-axis series into a complete SVG.
 
+    ``left_series`` and ``right_series`` are each a list of
+    ``(kind, points)`` tuples. All series on the same axis must share a
+    kind (all ping, or all curl), because a y-axis carries one unit.
+    Cross-axis can mix freely — that's the whole point of having two
+    axes.
+
+    Chart shapes follow from the counts:
+      * N=1, M=0   single-series chart, frame & axis tinted to the colour.
+      * N>=2, M=0  shared left axis; spine and label stay black, series
+                   carry distinct styles, legend disambiguates.
+      * N>=1, M>=1 double-y. Each side's spine/label is tinted when it
+                   carries one series and black otherwise — keeps the
+                   1+1 case visually identical to the original.
+
+    ``styles`` is one matplotlib-style string per series in
+    left-then-right order; if shorter than the series count the last
+    entry is recycled. ``labels`` is one legend entry per series in the
+    same order (None → no legend, or filename basenames if the caller
+    chooses).
+    """
+    n_left = len(left_series)
+    n_right = len(right_series)
+    if n_left + n_right < 1:
+        raise ValueError("render needs at least one series")
+
+    # A y-axis labels one unit, so each side must be one kind. The
+    # cross-axis case is exactly what gets the two axes.
+    for side_name, group in (("left", left_series), ("right", right_series)):
+        kinds = {k for k, _ in group}
+        if len(kinds) > 1:
+            raise ValueError(
+                f"{side_name}-axis files must all be the same kind "
+                f"(all ping, or all curl); got {sorted(kinds)}"
+            )
+
+    all_series = left_series + right_series
     if styles is None:
-        styles = default_styles(len(series_list), double_y)
+        styles = default_styles_for_axes(n_left, n_right)
     parsed = [
         parse_style(styles[min(i, len(styles) - 1)])
-        for i in range(len(series_list))
+        for i in range(len(all_series))
     ]
+    left_parsed = parsed[:n_left]
+    right_parsed = parsed[n_left:]
 
-    all_xs = [t for _, pts in series_list for t, _ in pts]
+    all_xs = [t for _, pts in all_series for t, _ in pts]
     plot = Plot(min(all_xs), max(all_xs), width=width, height=height)
 
     out = plot.header()
@@ -658,49 +719,44 @@ def render(series_list, log_y=False, double_y=False,
     if markers_used:
         out.append("<defs>" + "".join(MARKER_DEFS[m] for m in markers_used) + "</defs>")
 
-    if len(series_list) == 2 and double_y:
-        out += plot.frame(left_color=parsed[0][2], right_color=parsed[1][2])
-        sides = ["left", "right"]
-        for i, (kind, pts) in enumerate(series_list):
-            linestyle, marker, color = parsed[i]
-            axis = Axis(kind, [v for _, v in pts], log=log_y)
-            out += plot.y_axis(axis, side=sides[i], color=color)
-            out += plot.series(pts, axis, color=color,
-                               linestyle=linestyle, marker=marker)
-    elif len(series_list) == 2:
-        kinds = {k for k, _ in series_list}
-        if len(kinds) > 1:
-            raise ValueError(
-                "single y-axis charts need both series to be the same kind "
-                "(both ping or both curl); pass --double-y for mixed plots"
-            )
-        kind = series_list[0][0]
-        all_vals = [v for _, pts in series_list for _, v in pts]
+    double_y = n_left > 0 and n_right > 0
+
+    def _draw_side(side_series, side_parsed, side_name):
+        """Draw one axis and every series on it."""
+        kind = side_series[0][0]
+        all_vals = [v for _, pts in side_series for _, v in pts]
         axis = Axis(kind, all_vals, log=log_y)
-        out += plot.frame(left_color="black", right_color="black")
-        out += plot.y_axis(axis, side="left", color="black")
-        for (kind_i, pts), (linestyle, marker, color) in zip(series_list, parsed):
-            out += plot.series(pts, axis, color=color,
-                               linestyle=linestyle, marker=marker)
+        # When a side carries exactly one series, tint its spine/label
+        # to that series' colour (original 1- and 1+1-series look). With
+        # multiple series the colour belongs to the legend, not the axis.
+        axis_color = side_parsed[0][2] if len(side_series) == 1 else "black"
+        lines = plot.y_axis(axis, side=side_name, color=axis_color)
+        for (_, pts), (linestyle, marker, color) in zip(side_series, side_parsed):
+            lines += plot.series(pts, axis, color=color,
+                                 linestyle=linestyle, marker=marker)
+        return axis_color, lines
+
+    if double_y:
+        left_axis_color, left_lines = _draw_side(left_series, left_parsed, "left")
+        right_axis_color, right_lines = _draw_side(right_series, right_parsed, "right")
+        out += plot.frame(left_color=left_axis_color, right_color=right_axis_color)
+        out += left_lines + right_lines
     else:
-        linestyle, marker, color = parsed[0]
-        out += plot.frame(left_color=color, right_color="black")
-        kind, pts = series_list[0]
-        axis = Axis(kind, [v for _, v in pts], log=log_y)
-        out += plot.y_axis(axis, side="left", color=color)
-        out += plot.series(pts, axis, color=color,
-                           linestyle=linestyle, marker=marker)
+        # Single axis. Right-only was already folded into left by the caller.
+        left_axis_color, left_lines = _draw_side(left_series, left_parsed, "left")
+        out += plot.frame(left_color=left_axis_color, right_color="black")
+        out += left_lines
 
     out += plot.x_axis()
 
     if labels:
-        if len(labels) != len(series_list):
+        if len(labels) != len(all_series):
             raise ValueError(
-                f"got {len(labels)} legend labels for {len(series_list)} series"
+                f"got {len(labels)} legend labels for {len(all_series)} series"
             )
         entries = [
             (labels[i], parsed[i][2], parsed[i][0], parsed[i][1])
-            for i in range(len(series_list))
+            for i in range(len(all_series))
         ]
         out += plot.legend(entries)
 
@@ -887,29 +943,43 @@ def _stamp(buf):
 # ---------------------------------------------------------------------------
 
 def cmd_plot(args):
-    if args.double_y and len(args.files) != 2:
-        sys.exit("error: --double-y requires exactly two input files")
-    if not 1 <= len(args.files) <= 2:
-        sys.exit("error: expected one or two input files")
+    # Positionals default to the left axis (the common case: one or more
+    # same-kind recordings stack on one y-scale). --left appends more,
+    # --right opens a second y-axis; both can repeat.
+    left_paths = list(args.files or []) + list(args.left or [])
+    right_paths = list(args.right or [])
+
+    # A `--right`-only invocation is almost certainly user error (an
+    # off-side single chart looks broken), but rather than reject it,
+    # fold it back onto the left so they still get something useful.
+    if not left_paths and right_paths:
+        left_paths, right_paths = right_paths, []
+
+    if not left_paths and not right_paths:
+        sys.exit("error: no input files (pass paths positionally or via --left/--right)")
 
     try:
-        series = [parse_recording(p) for p in args.files]
+        left_series = [parse_recording(p) for p in left_paths]
+        right_series = [parse_recording(p) for p in right_paths]
     except (FileNotFoundError, ValueError) as e:
         sys.exit(str(e))
 
+    # Default the legend to file basenames whenever there's more than
+    # one series — otherwise readers can't tell which curve is which.
+    # Single-series charts stay un-labelled by default (no legend box).
+    all_paths = left_paths + right_paths
     labels = args.legend
-    if labels is None and len(series) == 2:
-        labels = [os.path.splitext(os.path.basename(p))[0] for p in args.files]
-    if labels is not None and len(labels) != len(series):
+    if labels is None and len(all_paths) > 1:
+        labels = [os.path.splitext(os.path.basename(p))[0] for p in all_paths]
+    if labels is not None and len(labels) != len(all_paths):
         sys.exit(
-            f"error: --legend got {len(labels)} label(s) for {len(series)} series"
+            f"error: --legend got {len(labels)} label(s) for {len(all_paths)} series"
         )
 
     try:
         svg = render(
-            series,
+            left_series, right_series,
             log_y=args.log_y,
-            double_y=args.double_y,
             width=args.width, height=args.height,
             styles=args.style,
             labels=labels,
@@ -917,7 +987,7 @@ def cmd_plot(args):
     except ValueError as e:
         sys.exit(str(e))
 
-    output = args.output if args.output is not None else auto_output_path(series)
+    output = args.output if args.output is not None else auto_output_path(left_series + right_series)
 
     if output == "-":
         sys.stdout.write(svg + "\n")
