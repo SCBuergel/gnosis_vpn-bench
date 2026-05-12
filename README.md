@@ -20,13 +20,13 @@ Cloudflare's anycast speed-test endpoint, and writes structured results
 gnosis_vpn-ctl --json status
 
 # Run the default full benchmark (baseline + all exits, 5 runs each)
-python3 speedtest.py locations
+./gnosis_vpn-bench locations
 
 # Run a quick single-run sweep
-python3 speedtest.py locations --runs 1 --warmup 5 --wait 2
+./gnosis_vpn-bench locations --runs 1 --warmup 5 --wait 2
 
 # Stream results to a live JSON file (updated after every test)
-python3 speedtest.py -o live.json locations
+./gnosis_vpn-bench -o live.json locations
 ```
 
 Output lands in `logs/`:
@@ -44,7 +44,7 @@ dashboard.  The file is written atomically (write-to-tmp + rename).
 ## Test modes
 
 ```
-python3 speedtest.py {locations,repeated,ramp,gap}
+./gnosis_vpn-bench {locations,repeated,ramp,gap}
 ```
 
 ### `locations` -- full per-exit benchmark
@@ -54,7 +54,7 @@ latency), then connects to each exit and runs N cycles of
 latency + 10 MB download + 10 MB upload.  Reports mean +/- stdev per location.
 
 ```bash
-python3 speedtest.py locations [--runs N] [--warmup S] [--wait S]
+./gnosis_vpn-bench locations [--runs N] [--warmup S] [--wait S]
 ```
 
 | Flag | Default | Meaning |
@@ -71,7 +71,7 @@ Per exit: 6 x 10 MB downloads.  The first runs immediately after connect
 (cold-tunnel performance); the remaining 5 follow 60 s gaps.
 
 ```bash
-python3 speedtest.py repeated
+./gnosis_vpn-bench repeated
 ```
 
 Use this to check whether throughput is stable once the tunnel is warm, or
@@ -83,7 +83,7 @@ Per exit: downloads 50 KB, 500 KB, 5 MB, 50 MB with 60 s gaps.  A 60 s
 warmup precedes the first download.
 
 ```bash
-python3 speedtest.py ramp
+./gnosis_vpn-bench ramp
 ```
 
 Small transfers are dominated by TCP slow-start and tunnel setup overhead.
@@ -96,7 +96,7 @@ Per exit: 13 x 10 MB downloads after a 60 s warmup.  Gaps between downloads
 increase: 0, 0, 5, 10, 15, ..., 55 s.
 
 ```bash
-python3 speedtest.py gap
+./gnosis_vpn-bench gap
 ```
 
 Tests whether idle periods cause the tunnel to degrade (e.g. congestion-window
@@ -104,16 +104,16 @@ decay, session teardown, or path re-routing).
 
 ## Monitor recordings & continuous tests
 
-Alongside the location-sweep benchmarks, `speedtest.py` exposes the
+Alongside the location-sweep benchmarks, `./gnosis_vpn-bench` exposes the
 recording / plotting subcommands that originated in
 [`gnosis_vpn-monitor`](https://github.com/SCBuergel/gnosis_vpn-monitor),
 plus a new `ping-load` mode that combines them:
 
 ```
-python3 speedtest.py ping  [HOST]   # record ping latency
-python3 speedtest.py curl  [URL]    # record curl throughput
-python3 speedtest.py plot  FILE…    # render an SVG/PNG chart
-python3 speedtest.py ping-load      # ping continuously + 10 MB curl burst every N min
+./gnosis_vpn-bench ping  [HOST]   # record ping latency
+./gnosis_vpn-bench curl  [URL]    # record curl throughput
+./gnosis_vpn-bench plot  FILE…    # render an SVG/PNG chart
+./gnosis_vpn-bench ping-load      # ping continuously + 10 MB curl burst every N min
 ```
 
 Recordings land in `./data/`, plots in `./output/` (both resolved
@@ -124,9 +124,9 @@ a recorder never silently overwrites the previous session's data.
 ### `ping` — latency recorder
 
 ```bash
-python3 speedtest.py ping                      # default host: google.com
-python3 speedtest.py ping example.org          # custom host
-python3 speedtest.py ping example.org -o run.txt
+./gnosis_vpn-bench ping                      # default host: google.com
+./gnosis_vpn-bench ping example.org          # custom host
+./gnosis_vpn-bench ping example.org -o run.txt
 ```
 
 Spawns a fresh `ping -c 1 -W 1 -D <host>` per second rather than letting
@@ -139,8 +139,8 @@ stdout only.
 ### `curl` — throughput recorder
 
 ```bash
-python3 speedtest.py curl                      # default URL: kernel.org tarball
-python3 speedtest.py curl https://example.com/big.bin
+./gnosis_vpn-bench curl                      # default URL: kernel.org tarball
+./gnosis_vpn-bench curl https://example.com/big.bin
 ```
 
 Runs `curl -o /dev/null <url>` and timestamps each progress update.
@@ -150,9 +150,9 @@ recording ends when the download finishes or you Ctrl-C.
 ### `ping-load` — continuous ping with periodic load bursts
 
 ```bash
-python3 speedtest.py ping-load                   # 30-min interval (default)
-python3 speedtest.py ping-load --interval 10     # 10-min interval
-python3 speedtest.py ping-load --host 1.1.1.1 --interval 15
+./gnosis_vpn-bench ping-load                   # 30-min interval (default)
+./gnosis_vpn-bench ping-load --interval 10     # 10-min interval
+./gnosis_vpn-bench ping-load --host 1.1.1.1 --interval 15
 ```
 
 Runs `ping` continuously in a background thread (writing to
@@ -164,7 +164,7 @@ from every burst contiguously, and `plot --double-y` consumes it
 directly:
 
 ```bash
-python3 speedtest.py plot --double-y \
+./gnosis_vpn-bench plot --double-y \
     data/ping--2026-05-11--23-57-47.txt \
     data/speed--2026-05-11--23-57-47.txt
 ```
@@ -185,9 +185,9 @@ spot.
 ### `plot` — render a chart
 
 ```bash
-python3 speedtest.py plot data/ping--TIMESTAMP.txt
-python3 speedtest.py plot data/curl--TIMESTAMP.txt
-python3 speedtest.py plot --double-y data/ping--TS.txt data/speed--TS.txt
+./gnosis_vpn-bench plot data/ping--TIMESTAMP.txt
+./gnosis_vpn-bench plot data/curl--TIMESTAMP.txt
+./gnosis_vpn-bench plot --double-y data/ping--TS.txt data/speed--TS.txt
 ```
 
 The recording's kind (ping vs. curl) is auto-detected from its content.
@@ -198,7 +198,7 @@ of the same kind share one y-axis; `--double-y` plots ping vs. curl on
 independent left/right axes. `--log-y`, `--style` (matplotlib-style
 format strings like `xb`, `o-r`, `.--g`), `--legend`, `--width`,
 `--height`, `--png-scale` are also accepted — see
-`speedtest.py plot --help` for the full list.
+`./gnosis_vpn-bench plot --help` for the full list.
 
 ### Recording file format
 
@@ -248,7 +248,7 @@ end-to-end VPN tunnel.  Cloudflare anycast avoids this problem.
 
 ## Tuning
 
-All timing constants are near the top of `speedtest.py`:
+All timing constants are near the top of `./gnosis_vpn-bench`:
 
 | Constant | Default | Description |
 |----------|---------|-------------|
