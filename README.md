@@ -230,14 +230,26 @@ optional `1`/`2`/`3` shade suffix — light/medium/dark — for charts that
 need to disambiguate multiple series within one family (think four red
 markers on one axis):
 
-| family   | bare        | `1` light      | `2` medium     | `3` dark / alt    |
-|----------|-------------|----------------|----------------|-------------------|
-| blue     | blue        | skyblue        | steelblue      | darkslateblue     |
-| green    | green       | lightgreen     | seagreen       | darkolivegreen    |
-| red      | red         | salmon         | indianred      | brown             |
-| cyan     | cyan        | paleturquoise  | cadetblue      | darkslategray     |
-| magenta  | magenta     | plum           | darkorchid     | indigo            |
-| yellow   | olive       | khaki          | darkkhaki      | saddlebrown       |
+| family   | bare    | `1` light  | `2` mid    | `3` dark   |
+|----------|---------|------------|------------|------------|
+| blue     | blue    | `#8BB5FF`  | `#5176CD`  | `#1C3A8B`  |
+| green    | green   | `#63D18F`  | `#0E9254`  | `#00561C`  |
+| red      | red     | `#FF9189`  | `#BF534E`  | `#7C1117`  |
+| cyan     | cyan    | `#00D1DA`  | `#00919B`  | `#00555F`  |
+| magenta  | magenta | `#E497E8`  | `#A35AA7`  | `#651E6A`  |
+| yellow   | olive   | `#D3B63B`  | `#957700`  | `#5A3E00`  |
+
+The 1/2/3 variants are derived from OKLCH (a perceptually uniform colour
+space): six hue angles equidistant around the wheel (25° 95° 155° 200°
+265° 325°), three lightness steps (0.78 / 0.58 / 0.38) at chroma 0.14,
+serialized to sRGB. The warm-to-cool hues hit the 0.14 chroma cleanly;
+yellow/green/cyan darks get gamut-clipped by sRGB (saturated dark
+yellow simply doesn't fit), so they read a touch more muted than the
+warm darks — an unavoidable colour-space limit, not a styling choice.
+
+A swatch sheet of all 24 entries side-by-side is at
+`output/ladder-overview.{svg,png}` — regenerate it with
+`python3 ladder_overview.py` after editing `COLOR_MAP`.
 
 Each step shifts saturation/hue as well as lightness so neighbouring
 shades read as a *different* colour, not just a brighter or dimmer copy

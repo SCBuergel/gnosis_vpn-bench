@@ -165,48 +165,50 @@ KIND_FORMATTER = {"ping": format_ms, "curl": format_bytes_per_second}
 # ---------------------------------------------------------------------------
 
 # Bare one-letter codes are the original CSS colours (back-compat — any
-# style string that worked before still renders the same colour). The
-# numbered variants 1/2/3 are an added shade ladder.
+# style string that worked before still renders the same colour).
 #
-# Each `1`/`2`/`3` step shifts BOTH lightness AND saturation/hue (not
-# just lightness), so neighbouring shades read as "different colour"
-# rather than "brighter/dimmer version of the same colour". This makes
-# e.g. `sr1` (salmon square) and `xr3` (brown cross) obviously different
-# even with similar marker shapes — solving the original "lots of red
-# squares I can't tell apart" problem. `k` and `w` have no shade
-# ladder — pure black/white don't have a meaningful sibling.
+# The numbered variants 1/2/3 (light/mid/dark) come from a fixed
+# OKLCH-derived palette: six hue angles (25° 95° 155° 200° 265° 325°)
+# chosen to be perceptually equidistant around the wheel, three
+# lightness levels (0.78 / 0.58 / 0.38) at chroma 0.14, serialized to
+# sRGB. The warm-to-cool hues hit 0.14 cleanly; yellow/green/cyan darks
+# get clipped to ~0.07–0.12 by the sRGB gamut (there's no such thing as
+# a saturated dark yellow in sRGB) and read slightly more muted than the
+# others — an unavoidable sRGB limit, not an aesthetic choice.
+#
+# `k` and `w` have no shade ladder.
 COLOR_MAP = {
-    # blue family — light pastel / muted medium / dark purple-tinted
-    "b":  "blue",            # pure blue (#0000ff, original)
-    "b1": "skyblue",         # light pastel  (#87ceeb)
-    "b2": "steelblue",       # muted medium  (#4682b4)
-    "b3": "darkslateblue",   # dark, purple-tinted, desat  (#483d8b)
-    # green family — light pastel / muted blue-tinted / dark yellow-tinted
-    "g":  "green",           # pure green (#008000, original)
-    "g1": "lightgreen",      # light pastel  (#90ee90)
-    "g2": "seagreen",        # muted medium, blue-tinted  (#2e8b57)
-    "g3": "darkolivegreen",  # dark, yellow-tinted  (#556b2f)
-    # red family — light pinkish / dusty medium / warm dark
-    "r":  "red",             # pure red (#ff0000, original)
-    "r1": "salmon",          # light pinkish  (#fa8072)
-    "r2": "indianred",       # dusty medium  (#cd5c5c)
-    "r3": "brown",           # warm dark, desat  (#a52a2a)
-    # cyan/teal family — light pastel / muted gray-blue / neutral dark
-    "c":  "cyan",            # pure cyan (#00ffff, original)
-    "c1": "paleturquoise",   # light pastel  (#afeeee)
-    "c2": "cadetblue",       # muted gray-blue medium  (#5f9ea0)
-    "c3": "darkslategray",   # dark neutral grey-green  (#2f4f4f)
-    # magenta/purple family — light plum / purple medium / blue-purple dark
-    "m":  "magenta",         # pure magenta (#ff00ff, original)
-    "m1": "plum",            # light pastel  (#dda0dd)
-    "m2": "darkorchid",      # purple-tinted medium  (#9932cc)
-    "m3": "indigo",          # blue-purple dark  (#4b0082)
-    # yellow/olive family — light tan / muted khaki / warm brown
-    "y":  "olive",           # olive (#808000, original — yellow itself
-                             # is unreadable on white)
-    "y1": "khaki",           # light tan  (#f0e68c)
-    "y2": "darkkhaki",       # muted khaki medium  (#bdb76b)
-    "y3": "saddlebrown",     # warm brown dark  (#8b4513)
+    # blue family — OKLCH H≈265°
+    "b":  "blue",            # bare: pure blue (#0000ff, original)
+    "b1": "#8BB5FF",         # light  L=0.77 C=0.12 (gamut-clipped from 0.14)
+    "b2": "#5176CD",         # mid    L=0.58 C=0.14
+    "b3": "#1C3A8B",         # dark   L=0.38 C=0.14
+    # green family — OKLCH H≈155°
+    "g":  "green",           # bare: pure green (#008000, original)
+    "g1": "#63D18F",         # light  L=0.78 C=0.14
+    "g2": "#0E9254",         # mid    L=0.58 C=0.14
+    "g3": "#00561C",         # dark   L=0.40 C=0.12 (gamut-clipped, H drifts to 147°)
+    # red family — OKLCH H≈25°
+    "r":  "red",             # bare: pure red (#ff0000, original)
+    "r1": "#FF9189",         # light  L=0.77 C=0.13
+    "r2": "#BF534E",         # mid    L=0.58 C=0.14
+    "r3": "#7C1117",         # dark   L=0.38 C=0.14
+    # cyan family — OKLCH H≈200°
+    "c":  "cyan",            # bare: pure cyan (#00ffff, original)
+    "c1": "#00D1DA",         # light  L=0.78 C=0.13
+    "c2": "#00919B",         # mid    L=0.60 C=0.10 (gamut-clipped)
+    "c3": "#00555F",         # dark   L=0.41 C=0.07 (gamut-clipped; reads muted)
+    # purple/magenta family — OKLCH H≈325°
+    "m":  "magenta",         # bare: pure magenta (#ff00ff, original)
+    "m1": "#E497E8",         # light  L=0.78 C=0.14
+    "m2": "#A35AA7",         # mid    L=0.58 C=0.14
+    "m3": "#651E6A",         # dark   L=0.38 C=0.14
+    # yellow family — OKLCH H≈95°
+    "y":  "olive",           # bare: olive (#808000, original — pure
+                             # yellow is unreadable on white)
+    "y1": "#D3B63B",         # light  L=0.78 C=0.14
+    "y2": "#957700",         # mid    L=0.58 C=0.12 (gamut-clipped)
+    "y3": "#5A3E00",         # dark   L=0.39 C=0.08 (gamut-clipped; reads muted)
     # neutrals — no shade ladder
     "k":  "black",
     "w":  "white",
