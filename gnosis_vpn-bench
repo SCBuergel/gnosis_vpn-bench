@@ -156,7 +156,7 @@ modes:
                     "start). Each burst's curl progress is appended to "
                     "--speed-output, with no separator lines between bursts, "
                     "so the two files can be plotted together via "
-                    "`plot --double-y`.",
+                    "`plot PING --right SPEED`.",
     )
     p_pl.add_argument("--host", default=DEFAULT_PING_HOST,
                       help=f"ping host (default: {DEFAULT_PING_HOST})")

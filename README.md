@@ -210,10 +210,45 @@ recording kind is auto-detected from each file's contents.
 With no `-o` the chart is written under `output/` with a timestamped
 filename plus a sibling PNG (requires `rsvg-convert`, ImageMagick or
 Inkscape on `PATH`; falls back to SVG-only if none is found). `--log-y`,
-`--style` (matplotlib-style format strings like `xb`, `o-r`, `.--g`,
-repeated once per series in left-then-right order), `--legend`,
-`--width`, `--height`, `--png-scale` are also accepted — see
+`--legend`, `--width`, `--height`, `--png-scale` are also accepted — see
 `./gnosis_vpn-bench plot --help` for the full list.
+
+#### Style strings (`--style`)
+
+Each `--style` is one matplotlib-style format string, applied to series
+in left-then-right order. A style combines up to three pieces in any
+order:
+
+| component | codes |
+|-----------|-------|
+| linestyle | `-` `--` `-.` `:` |
+| marker    | `.` `o` `x` `+` `*` `s` `D` `^` `v` |
+| colour    | `b` `g` `r` `c` `m` `y` `k` `w` |
+
+Colour letters in the six colourful families (`b g r c m y`) accept an
+optional `1`/`2`/`3` shade suffix — light/medium/dark — for charts that
+need to disambiguate multiple series within one family (think four red
+markers on one axis):
+
+| family   | bare        | `1` light     | `2` medium      | `3` dark        |
+|----------|-------------|---------------|-----------------|-----------------|
+| blue     | blue        | skyblue       | steelblue       | navy            |
+| green    | green       | lightgreen    | seagreen        | darkgreen       |
+| red      | red         | salmon        | firebrick       | darkred         |
+| cyan     | cyan        | paleturquoise | darkturquoise   | teal            |
+| magenta  | magenta     | plum          | orchid          | darkmagenta     |
+| yellow   | olive       | khaki         | darkkhaki       | darkolivegreen  |
+
+`k` (black) and `w` (white) have no shade ladder. Bare letters keep
+their original meanings — every style string that worked before still
+renders the same colour.
+
+```bash
+# Four series on one axis, two shapes × two shades — every series is
+# visually distinct without legend-hunting.
+./gnosis_vpn-bench plot a.txt b.txt c.txt d.txt \
+    --style sr1 --style sr3 --style xr1 --style xr3
+```
 
 ### Recording file format
 

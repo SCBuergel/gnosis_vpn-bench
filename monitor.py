@@ -2,7 +2,7 @@
 """Record and plot gnosisVPN ping/curl traces, plus the `ping-load` test.
 
 Ported from the standalone `gnosis_vpn-monitor` tool. Exposes four CLI
-sub-command entry points (called from `speedtest.py`'s argparse):
+sub-command entry points (called from `gnosis_vpn-bench`'s argparse):
 
     cmd_ping        record ping latency to a host
     cmd_curl        record curl download throughput
@@ -164,10 +164,53 @@ KIND_FORMATTER = {"ping": format_ms, "curl": format_bytes_per_second}
 # Style parsing (matplotlib-style format strings: "xb", "o-r", ".--g", …)
 # ---------------------------------------------------------------------------
 
+# Bare one-letter codes are the original CSS colours (back-compat — any
+# style string that worked before still renders the same colour). The
+# numbered variants 1/2/3 are an added light → medium → dark shade
+# ladder, picked from CSS-named colours that are visually well-spaced so
+# e.g. `sr1` (salmon square) and `xr3` (darkred cross) read as obviously
+# different even with similar marker shapes. `k` and `w` have no shade
+# ladder — pure black/white don't have a meaningful "darker version".
 COLOR_MAP = {
-    "b": "blue",      "g": "green",      "r": "red",       "c": "cyan",
-    "m": "magenta",   "y": "olive",      "k": "black",     "w": "white",
+    # blue family
+    "b":  "blue",            # pure blue (#0000ff, original)
+    "b1": "skyblue",         # light  (#87ceeb)
+    "b2": "steelblue",       # medium (#4682b4)
+    "b3": "navy",            # dark   (#000080)
+    # green family
+    "g":  "green",           # pure green (#008000, original)
+    "g1": "lightgreen",      # light  (#90ee90)
+    "g2": "seagreen",        # medium (#2e8b57)
+    "g3": "darkgreen",       # dark   (#006400)
+    # red family
+    "r":  "red",             # pure red (#ff0000, original)
+    "r1": "salmon",          # light  (#fa8072)
+    "r2": "firebrick",       # medium (#b22222)
+    "r3": "darkred",         # dark   (#8b0000)
+    # cyan/teal family
+    "c":  "cyan",            # pure cyan (#00ffff, original)
+    "c1": "paleturquoise",   # light  (#afeeee)
+    "c2": "darkturquoise",   # medium (#00ced1)
+    "c3": "teal",            # dark   (#008080)
+    # magenta/purple family
+    "m":  "magenta",         # pure magenta (#ff00ff, original)
+    "m1": "plum",            # light  (#dda0dd)
+    "m2": "orchid",          # medium (#da70d6)
+    "m3": "darkmagenta",     # dark   (#8b008b)
+    # yellow/olive family
+    "y":  "olive",           # olive (#808000, original — yellow itself
+                             # is unreadable on white)
+    "y1": "khaki",           # light  (#f0e68c)
+    "y2": "darkkhaki",       # medium (#bdb76b)
+    "y3": "darkolivegreen",  # dark   (#556b2f)
+    # neutrals — no shade ladder
+    "k":  "black",
+    "w":  "white",
 }
+
+# Letters that may take a digit suffix to select a shade. `k` and `w`
+# are deliberately excluded: black and white don't have a shade family.
+SHADED_COLOR_LETTERS = set("brgcmy")
 
 LINESTYLE_DASH = {
     "-":  None,
@@ -206,10 +249,18 @@ def _xml_escape(s):
 
 
 def parse_style(spec):
-    """Parse a matplotlib-style format string into (linestyle, marker, color)."""
+    """Parse a matplotlib-style format string into (linestyle, marker, color).
+
+    Colour codes accept an optional 1/2/3 shade suffix (e.g. `r3`,
+    `b1`) for the colourful families. The suffix is only consumed when
+    the resulting two-char token is actually defined in COLOR_MAP — so
+    a stray digit (`b9`) doesn't get silently absorbed and instead
+    triggers the usual "unknown character" error.
+    """
     linestyle = marker = color = None
     i = 0
     while i < len(spec):
+        # Two-char linestyles checked first so "--" doesn't lose its first "-".
         if spec[i:i + 2] in ("--", "-."):
             if linestyle is not None:
                 raise ValueError(f"duplicate linestyle in style {spec!r}")
@@ -221,22 +272,34 @@ def parse_style(spec):
             if linestyle is not None:
                 raise ValueError(f"duplicate linestyle in style {spec!r}")
             linestyle = ch
-        elif ch in MARKER_DEFS:
+            i += 1
+            continue
+        if ch in MARKER_DEFS:
             if marker is not None:
                 raise ValueError(f"duplicate marker in style {spec!r}")
             marker = ch
-        elif ch in COLOR_MAP:
+            i += 1
+            continue
+        if ch in COLOR_MAP:
             if color is not None:
                 raise ValueError(f"duplicate colour in style {spec!r}")
-            color = ch
-        else:
-            raise ValueError(
-                f"unknown character {ch!r} in style {spec!r} — "
-                "expected one of linestyle (- -- -. :), "
-                f"marker ({' '.join(sorted(MARKER_DEFS))}), "
-                f"or colour ({' '.join(COLOR_MAP)})"
-            )
-        i += 1
+            two = spec[i:i + 2]
+            if (ch in SHADED_COLOR_LETTERS
+                    and len(two) == 2
+                    and two in COLOR_MAP):
+                color = two
+                i += 2
+            else:
+                color = ch
+                i += 1
+            continue
+        raise ValueError(
+            f"unknown character {ch!r} in style {spec!r} — "
+            "expected one of linestyle (- -- -. :), "
+            f"marker ({' '.join(sorted(MARKER_DEFS))}), "
+            "or colour (b g r c m y k w; the colourful families also "
+            "accept a 1/2/3 shade suffix, e.g. b3, r1, g2)"
+        )
     return linestyle, marker, COLOR_MAP[color or DEFAULT_COLOR_CODE]
 
 
@@ -1025,7 +1088,7 @@ def cmd_ping_load(args):
     every curl burst's progress meter is appended to ``--speed-output``.
     Plotting the two files together via
 
-        speedtest.py plot --double-y data/ping.txt data/speed.txt
+        gnosis_vpn-bench plot data/ping.txt --right data/speed.txt
 
     gives one chart with latency on the left axis and throughput on the
     right — that's the whole point of the mode.
