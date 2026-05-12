@@ -230,14 +230,19 @@ optional `1`/`2`/`3` shade suffix — light/medium/dark — for charts that
 need to disambiguate multiple series within one family (think four red
 markers on one axis):
 
-| family   | bare        | `1` light     | `2` medium      | `3` dark        |
-|----------|-------------|---------------|-----------------|-----------------|
-| blue     | blue        | skyblue       | steelblue       | navy            |
-| green    | green       | lightgreen    | seagreen        | darkgreen       |
-| red      | red         | salmon        | firebrick       | darkred         |
-| cyan     | cyan        | paleturquoise | darkturquoise   | teal            |
-| magenta  | magenta     | plum          | orchid          | darkmagenta     |
-| yellow   | olive       | khaki         | darkkhaki       | darkolivegreen  |
+| family   | bare        | `1` light      | `2` medium     | `3` dark / alt    |
+|----------|-------------|----------------|----------------|-------------------|
+| blue     | blue        | skyblue        | steelblue      | darkslateblue     |
+| green    | green       | lightgreen     | seagreen       | darkolivegreen    |
+| red      | red         | salmon         | indianred      | brown             |
+| cyan     | cyan        | paleturquoise  | cadetblue      | darkslategray     |
+| magenta  | magenta     | plum           | darkorchid     | indigo            |
+| yellow   | olive       | khaki          | darkkhaki      | saddlebrown       |
+
+Each step shifts saturation/hue as well as lightness so neighbouring
+shades read as a *different* colour, not just a brighter or dimmer copy
+of the bare one — exactly so multiple markers of the same family stay
+distinguishable.
 
 `k` (black) and `w` (white) have no shade ladder. Bare letters keep
 their original meanings — every style string that worked before still
