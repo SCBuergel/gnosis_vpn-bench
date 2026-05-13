@@ -226,7 +226,7 @@ LINESTYLE_DASH = {
 }
 
 MARKER_DEFS = {
-    ".": '<g id="m-dot"><circle r="3" fill="currentColor"/></g>',
+    ".": '<g id="m-dot"><circle r="2" fill="currentColor"/></g>',
     "o": '<g id="m-circle"><circle r="6" fill="none" stroke="currentColor" stroke-width="2"/></g>',
     "x": '<g id="m-x"><path d="M-6,-6L6,6M-6,6L6,-6" stroke="currentColor" stroke-width="2" fill="none"/></g>',
     "+": '<g id="m-plus"><path d="M-6,0L6,0M0,-6L0,6" stroke="currentColor" stroke-width="2" fill="none"/></g>',
