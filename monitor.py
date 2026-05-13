@@ -465,6 +465,13 @@ MARGIN_BOTTOM = 50
 FONT_SIZE = 14
 STROKE_WIDTH = 3
 
+# Inset (in px) for the data area inside the left/right frame bars.
+# Without this, samples at the data extremes plot dead on the vertical
+# axes and their markers bleed across the bar. 8 px covers the widest
+# marker glyph in MARKER_DEFS (the ~7 px half-extent of `x`, `+`, `*`,
+# `^`, `v`, `o` once stroke width is included) with a px of slack.
+X_AXIS_INSET = 8
+
 # Default --style values per chart shape. Hand-picked for the small
 # cases so the canonical 1-series and 2-series charts look identical to
 # the original tool; longer cycles kick in once N+M > 2.
@@ -509,9 +516,9 @@ class Plot:
 
     def x_pixel(self, x):
         if self.x1 == self.x0:
-            return MARGIN_LEFT
-        span = self.width - MARGIN_LEFT - MARGIN_RIGHT
-        return MARGIN_LEFT + (x - self.x0) / (self.x1 - self.x0) * span
+            return MARGIN_LEFT + X_AXIS_INSET
+        span = self.width - MARGIN_LEFT - MARGIN_RIGHT - 2 * X_AXIS_INSET
+        return MARGIN_LEFT + X_AXIS_INSET + (x - self.x0) / (self.x1 - self.x0) * span
 
     def y_pixel(self, y, axis):
         v = axis.transform(y)
