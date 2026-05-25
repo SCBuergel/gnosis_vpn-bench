@@ -1085,7 +1085,7 @@ class Plot:
 
 def render(left_series, right_series, log_y=False,
            width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT,
-           styles=None, labels=None,
+           styles=None, labels=None, title=None,
            box_width_px=DEFAULT_BOX_WIDTH_PX,
            box_show_dots=False, box_show_labels=False):
     """Render N left-axis + M right-axis series into a complete SVG.
@@ -1204,6 +1204,16 @@ def render(left_series, right_series, log_y=False,
             for i in range(len(all_series))
         ]
         out += plot.legend(entries)
+
+    # Title sits in the existing top margin, centered above the frame.
+    # FONT_SIZE+4 baseline leaves ~8px of breathing room between the
+    # text and the frame top (MARGIN_TOP=30).
+    if title:
+        out.append(
+            f'<text x="{plot.width / 2:.1f}" y="{FONT_SIZE + 4}" '
+            f'text-anchor="middle" fill="black">'
+            f'{_xml_escape(title)}</text>'
+        )
 
     out += plot.footer()
     return "\n".join(out)
@@ -1571,6 +1581,7 @@ def cmd_plot(args):
             width=args.width, height=args.height,
             styles=args.style,
             labels=labels,
+            title=args.title,
             box_width_px=args.box_width,
             box_show_dots=args.box_show_dots,
             box_show_labels=args.box_label,

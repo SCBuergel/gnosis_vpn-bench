@@ -210,8 +210,10 @@ recording kind is auto-detected from each file's contents.
 With no `-o` the chart is written under `output/` with a timestamped
 filename plus a sibling PNG (requires `rsvg-convert`, ImageMagick or
 Inkscape on `PATH`; falls back to SVG-only if none is found).
-`--legend`, `--width`, `--height`, `--png-scale` are also accepted —
-see `./gnosis_vpn-bench plot --help` for the full list.
+`--legend`, `--title`, `--width`, `--height`, `--png-scale` are also
+accepted — see `./gnosis_vpn-bench plot --help` for the full list.
+`--title TEXT` prints a centered black title above the frame, in the
+same font and size as the axis labels and legend.
 
 #### Log-scale y-axis (`--log-y`)
 

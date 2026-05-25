@@ -199,6 +199,9 @@ modes:
                              "(e.g. --style xb --style or)")
     p_plot.add_argument("--legend", action="append", default=None, metavar="LABEL",
                         help="legend entry per series")
+    p_plot.add_argument("--title", default=None, metavar="TEXT",
+                        help="chart title, centered above the plot frame "
+                             "in the same font/size as labels and legend")
     p_plot.set_defaults(func=cmd_plot)
 
     p_pl = sub.add_parser(
