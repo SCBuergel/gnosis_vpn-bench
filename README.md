@@ -303,10 +303,20 @@ linestyle and marker codes are silently ignored (a box has neither).
 The legend swatch for a box series is a miniature box icon rather than
 a line+marker sample.
 
-Box files normally land on the **right axis** when there's any other
-data on the chart. If `--boxes` is the only input (no `--left`, no
-positional, no `--right`), the boxes ARE the chart and occupy a single
-tinted axis — same shape as a single-series ping chart.
+Box files default to the **right axis**, but routing is kind-aware so
+the common cross-axis workflow Just Works:
+
+| Other inputs                       | Boxes land on |
+|------------------------------------|----|
+| (none — `--boxes` only)            | left (single-axis chart) |
+| `--left ping` / positional `ping`  | right |
+| `--right ping`                     | left (right is already occupied by a different kind) |
+| `--right curl-dots`                | right (matching kind — shares the axis) |
+| `--left X` and `--right Y` both filled with conflicting kinds | error |
+
+When routing puts boxes on the left axis (because the right is
+occupied by a conflicting kind), an `INFO` log line surfaces the
+decision so it's not a silent surprise.
 
 To verify each box matches its raw data, run with
 `--log-level DEBUG` — the per-burst samples are then dumped on stdout

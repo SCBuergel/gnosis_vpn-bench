@@ -1480,27 +1480,72 @@ def cmd_plot(args):
     left_series = [Series(k, pts, mode="dots") for k, pts in left_dot_recs]
     right_series = [Series(k, pts, mode="dots") for k, pts in right_dot_recs]
 
-    # Boxes default to the right axis when there's any left content;
-    # otherwise they ARE the chart and become the single (left-folded)
-    # series set.
-    if left_series:
-        right_series = right_series + box_series
-    else:
-        # No left content. Right-axis dots (if any) and box series both
-        # fold onto the single axis — keeps the chart from looking
-        # half-empty against an unused left frame.
-        left_series = right_series + box_series
-        right_series = []
+    # Path-per-axis trackers so we can reconstruct an ordered `all_paths`
+    # that lines up with `left_series + right_series` once box routing
+    # finishes (legend labels and --style positions depend on this
+    # ordering being exact).
+    left_paths_routed = list(left_paths)
+    right_paths_routed = list(right_paths)
 
-    # Default the legend to file basenames whenever there's more than
-    # one series — otherwise readers can't tell which curve is which.
-    # Single-series charts stay un-labelled by default (no legend box).
-    # Order must match left_series + right_series above so legend
-    # entries and styles line up with the series they describe.
-    if left_paths:
-        all_paths = left_paths + right_paths + box_paths
-    else:
-        all_paths = right_paths + box_paths
+    # Box routing rules (per box, in priority order):
+    #   1. Both axes empty                       → left  (single-axis chart)
+    #   2. Right axis empty OR matches box.kind  → right (the natural home)
+    #   3. Left axis empty OR matches box.kind   → left  (fall back when
+    #                                                     the right axis
+    #                                                     already carries
+    #                                                     conflicting data
+    #                                                     — e.g. ping)
+    #   4. Both axes occupied with conflicting kinds → error
+    # This makes `--right ping --boxes speed` Just Work (boxes go to the
+    # empty left axis) instead of failing the same-kind-per-axis check.
+    def _route_box(bs, left, right):
+        if not left and not right:
+            return "left"
+        right_kind = right[0].kind if right else None
+        left_kind = left[0].kind if left else None
+        if right_kind is None or right_kind == bs.kind:
+            return "right"
+        if left_kind is None or left_kind == bs.kind:
+            return "left"
+        return None
+
+    for path, bs in zip(box_paths, box_series):
+        side = _route_box(bs, left_series, right_series)
+        if side == "right":
+            right_series.append(bs)
+            right_paths_routed.append(path)
+        elif side == "left":
+            left_series.append(bs)
+            left_paths_routed.append(path)
+            # When boxes land on left despite right being non-empty,
+            # surface why — surprising to a reader expecting the
+            # "boxes → right" default.
+            if right_series:
+                log.info(
+                    "routing: --boxes %s placed on LEFT axis "
+                    "(right axis already carries kind=%r, "
+                    "boxes kind=%r)",
+                    path, right_series[0].kind, bs.kind,
+                )
+        else:
+            sys.exit(
+                f"error: --boxes {path} (kind={bs.kind!r}) doesn't fit "
+                f"either axis — left kind={left_series[0].kind!r}, "
+                f"right kind={right_series[0].kind!r}. "
+                "Move one of the conflicting --left/--right files."
+            )
+
+    # Single-axis fold: if everything ended up on the right (no left
+    # dots and no boxes that landed left), move it to left so the chart
+    # doesn't render with an unused left frame. Has no effect once left
+    # holds anything.
+    if not left_series and right_series:
+        left_series, right_series = right_series, []
+        left_paths_routed, right_paths_routed = right_paths_routed, []
+
+    # Order must match left_series + right_series so legend entries
+    # and styles line up with the series they describe.
+    all_paths = left_paths_routed + right_paths_routed
     labels = args.legend
     if labels is None and len(all_paths) > 1:
         labels = [os.path.splitext(os.path.basename(p))[0] for p in all_paths]
