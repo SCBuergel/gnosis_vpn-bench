@@ -79,6 +79,19 @@ DEFAULT_PING_LOAD_CURL_URL = (
     "https://speed.cloudflare.com/__down?bytes=10485760"  # 10 MB
 )
 
+# ---------------------------------------------------------------------------
+# Box-plot defaults
+# ---------------------------------------------------------------------------
+#
+# `--boxes` renders a curl/speed recording as one box per burst instead
+# of one dot per progress sample. Defaults are chosen for `ping-load`
+# output: bursts every 30 min (gap ≫ 60 s) and ~3–50 sub-second samples
+# per burst (gap ≪ 60 s), so any threshold between 1 s and 800 s would
+# work; 60 s leaves both bounds comfortably far away.
+DEFAULT_BOX_GAP_S = 60
+DEFAULT_BOX_MIN_SAMPLES = 1
+DEFAULT_BOX_WIDTH_PX = 10
+
 
 # ---------------------------------------------------------------------------
 # Parsing
@@ -135,6 +148,73 @@ def parse_recording(path):
     if not points:
         raise ValueError(f"no recognisable ping or curl data in {path}")
     return kind, points
+
+
+# ---------------------------------------------------------------------------
+# Burst segmentation + summarization (for --boxes)
+# ---------------------------------------------------------------------------
+#
+# A curl/speed recording from ping-load contains many bursts separated
+# by long idle gaps (default 30 min) and tight intra-burst sample
+# spacing (sub-second). Splitting by a fixed time gap is robust to curl
+# banner-line drift and doesn't care about file format details — only
+# the timestamps. If a future mode emits back-to-back bursts with no
+# idle gap, this function would fuse them; raise the gap threshold or
+# add banner-detection then.
+
+def segment_bursts(points, gap_seconds, min_samples):
+    """Group sample points into bursts separated by ``gap_seconds`` of silence.
+
+    ``points`` is the ``[(unix_ts, value), …]`` list from
+    ``parse_recording``. Bursts with fewer than ``min_samples`` samples
+    are dropped.
+    """
+    if not points:
+        return []
+    bursts = []
+    current = [points[0]]
+    for p in points[1:]:
+        if p[0] - current[-1][0] > gap_seconds:
+            if len(current) >= min_samples:
+                bursts.append(current)
+            current = [p]
+        else:
+            current.append(p)
+    if len(current) >= min_samples:
+        bursts.append(current)
+    return bursts
+
+
+def summarize_burst(samples):
+    """Reduce a burst (list of ``(t, v)``) to a dict of summary stats.
+
+    Population standard deviation (divisor n, not n-1) is used so the
+    body of the box ``[mean-σ, mean+σ]`` is always contained within the
+    whisker range ``[min, max]`` for any sample count ≥ 2 — keeps the
+    visual invariant simple. For N=1 the box collapses to a point.
+    """
+    vs = [v for _, v in samples]
+    n = len(vs)
+    vs_sorted = sorted(vs)
+    if n % 2:
+        vmed = vs_sorted[n // 2]
+    else:
+        vmed = (vs_sorted[n // 2 - 1] + vs_sorted[n // 2]) / 2
+    vmean = sum(vs) / n
+    var = sum((v - vmean) ** 2 for v in vs) / n
+    vstd = math.sqrt(var)
+    ts = [t for t, _ in samples]
+    return {
+        "n": n,
+        "samples": samples,
+        "t_start": ts[0],
+        "t_center": ts[len(ts) // 2] if n % 2 else (ts[n // 2 - 1] + ts[n // 2]) / 2,
+        "min": vs_sorted[0],
+        "max": vs_sorted[-1],
+        "median": vmed,
+        "mean": vmean,
+        "stdev": vstd,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +587,29 @@ def default_styles_for_axes(n_left, n_right):
     return left + right
 
 
+class Series:
+    """One plotted series, rendered either as line+marker or as box plots.
+
+    A box series carries pre-computed ``bursts`` (dicts from
+    ``summarize_burst``) plus the original ``points`` it was segmented
+    from — points are still used for axis-range determination and for
+    the optional sample-underlay when ``--box-show-dots`` is set.
+    """
+    __slots__ = ("kind", "points", "mode", "bursts")
+
+    def __init__(self, kind, points, mode="dots", bursts=None):
+        if mode not in ("dots", "boxes"):
+            raise ValueError(
+                f"Series mode must be 'dots' or 'boxes', got {mode!r}"
+            )
+        if mode == "boxes" and bursts is None:
+            raise ValueError("Series(mode='boxes') requires bursts")
+        self.kind = kind
+        self.points = points
+        self.mode = mode
+        self.bursts = bursts
+
+
 class Plot:
     def __init__(self, x0, x1, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
         self.x0 = x0
@@ -650,6 +753,13 @@ class Plot:
         return out
 
     def legend(self, entries):
+        """Render the legend box.
+
+        Each entry is a 5-tuple ``(label, color, linestyle, marker, mode)``
+        where ``mode`` is ``"dots"`` or ``"boxes"``. Dots entries draw a
+        line+marker swatch; box entries draw a miniature box-plot icon
+        (whisker + caps + body + median tick).
+        """
         if not entries:
             return []
 
@@ -676,26 +786,64 @@ class Plot:
 
         sample_x0 = box_x + pad
         sample_x1 = sample_x0 + sample_w
-        for i, (label, color, linestyle, marker) in enumerate(entries):
+        for i, (label, color, linestyle, marker, mode) in enumerate(entries):
             cy = box_y + pad / 2 + line_h * (i + 0.5)
-            if linestyle is not None:
-                attrs = [
-                    f'x1="{sample_x0:.1f}"', f'y1="{cy:.1f}"',
-                    f'x2="{sample_x1:.1f}"', f'y2="{cy:.1f}"',
-                    f'stroke="{color}"',
-                    f'stroke-width="{STROKE_WIDTH}"',
-                    'stroke-linecap="round"',
-                ]
-                dash = LINESTYLE_DASH[linestyle]
-                if dash:
-                    attrs.append(f'stroke-dasharray="{dash}"')
-                out.append(f'<line {" ".join(attrs)}/>')
-            if marker is not None:
+            if mode == "boxes":
+                # Compact box icon: whisker spanning ~70% of the row,
+                # body a centred third, plus a median tick. The swatch
+                # is intentionally narrower than the data-area box so a
+                # legend with many entries doesn't bloat the row height.
                 mx = (sample_x0 + sample_x1) / 2
+                half = sample_w / 4
+                top_y = cy - line_h * 0.35
+                bot_y = cy + line_h * 0.35
+                body_top = cy - line_h * 0.18
+                body_bot = cy + line_h * 0.18
                 out.append(
-                    f'<use href="{MARKER_HREFS[marker]}" '
-                    f'x="{mx:.1f}" y="{cy:.1f}" color="{color}"/>'
+                    f'<line x1="{mx:.1f}" y1="{top_y:.1f}" '
+                    f'x2="{mx:.1f}" y2="{bot_y:.1f}" '
+                    f'stroke="{color}" stroke-width="1.5"/>'
                 )
+                out.append(
+                    f'<line x1="{mx-half:.1f}" y1="{top_y:.1f}" '
+                    f'x2="{mx+half:.1f}" y2="{top_y:.1f}" '
+                    f'stroke="{color}" stroke-width="1.5"/>'
+                )
+                out.append(
+                    f'<line x1="{mx-half:.1f}" y1="{bot_y:.1f}" '
+                    f'x2="{mx+half:.1f}" y2="{bot_y:.1f}" '
+                    f'stroke="{color}" stroke-width="1.5"/>'
+                )
+                out.append(
+                    f'<rect x="{mx-half:.1f}" y="{body_top:.1f}" '
+                    f'width="{2*half:.1f}" height="{(body_bot-body_top):.1f}" '
+                    f'fill="{color}" fill-opacity="0.25" '
+                    f'stroke="{color}" stroke-width="1.5"/>'
+                )
+                out.append(
+                    f'<line x1="{mx-half:.1f}" y1="{cy:.1f}" '
+                    f'x2="{mx+half:.1f}" y2="{cy:.1f}" '
+                    f'stroke="{color}" stroke-width="2"/>'
+                )
+            else:
+                if linestyle is not None:
+                    attrs = [
+                        f'x1="{sample_x0:.1f}"', f'y1="{cy:.1f}"',
+                        f'x2="{sample_x1:.1f}"', f'y2="{cy:.1f}"',
+                        f'stroke="{color}"',
+                        f'stroke-width="{STROKE_WIDTH}"',
+                        'stroke-linecap="round"',
+                    ]
+                    dash = LINESTYLE_DASH[linestyle]
+                    if dash:
+                        attrs.append(f'stroke-dasharray="{dash}"')
+                    out.append(f'<line {" ".join(attrs)}/>')
+                if marker is not None:
+                    mx = (sample_x0 + sample_x1) / 2
+                    out.append(
+                        f'<use href="{MARKER_HREFS[marker]}" '
+                        f'x="{mx:.1f}" y="{cy:.1f}" color="{color}"/>'
+                    )
             out.append(
                 f'<text x="{sample_x1 + pad:.1f}" y="{cy + FONT_SIZE * 0.35:.1f}" '
                 f'fill="black">{_xml_escape(label)}</text>'
@@ -735,17 +883,134 @@ class Plot:
 
         return out
 
+    def boxes(self, bursts, axis, color, kind,
+              width_px=DEFAULT_BOX_WIDTH_PX,
+              show_dots=False, show_labels=False):
+        """Draw one box per burst at ``b["t_center"]`` on the value axis.
+
+        Anatomy per box:
+          * vertical whisker from ``min`` to ``max`` with horizontal caps
+          * translucent body rectangle from ``mean-σ`` to ``mean+σ``
+          * solid horizontal median tick across the body
+          * (optional) raw samples as small translucent dots
+          * (optional) multi-line stat label to the right of the box
+
+        ``width_px`` is fixed pixel width, intentionally not data-time
+        width — at default ``--interval 30 min`` a single burst is
+        ~0.006% of a 24-hour x-range and would render sub-pixel if
+        scaled to data-time.
+        """
+        if not bursts:
+            return []
+        out = []
+        half = width_px / 2
+        fmt = KIND_FORMATTER.get(kind, lambda v: f"{v:g}")
+        label_font = FONT_SIZE * 0.75
+        label_line_h = label_font * 1.15
+
+        for b in bursts:
+            if not (axis.is_visible(b["min"]) and axis.is_visible(b["max"])):
+                # log-y can't render non-positive samples; skip silently
+                # (the user already saw the warning from Axis).
+                continue
+            cx = self.x_pixel(b["t_center"])
+            x_left = cx - half
+            x_right = cx + half
+            # Population σ keeps the body inside [min, max] for n≥1, but
+            # be defensive in case a future change flips to sample σ.
+            body_lo = max(b["min"], b["mean"] - b["stdev"])
+            body_hi = min(b["max"], b["mean"] + b["stdev"])
+            y_top = self.y_pixel(b["max"], axis)
+            y_bot = self.y_pixel(b["min"], axis)
+            y_body_top = self.y_pixel(body_hi, axis)
+            y_body_bot = self.y_pixel(body_lo, axis)
+            y_med = self.y_pixel(b["median"], axis)
+
+            # Whisker line + caps (use 1.5 px stroke — thinner than series
+            # lines so a box-stack doesn't overpower paired ping lines).
+            out.append(
+                f'<line x1="{cx:.1f}" y1="{y_top:.1f}" '
+                f'x2="{cx:.1f}" y2="{y_bot:.1f}" '
+                f'stroke="{color}" stroke-width="1.5"/>'
+            )
+            out.append(
+                f'<line x1="{x_left:.1f}" y1="{y_top:.1f}" '
+                f'x2="{x_right:.1f}" y2="{y_top:.1f}" '
+                f'stroke="{color}" stroke-width="1.5"/>'
+            )
+            out.append(
+                f'<line x1="{x_left:.1f}" y1="{y_bot:.1f}" '
+                f'x2="{x_right:.1f}" y2="{y_bot:.1f}" '
+                f'stroke="{color}" stroke-width="1.5"/>'
+            )
+
+            # Body rect. Ensure a minimum visible height so N=1 / zero-σ
+            # bursts still draw something the eye can see.
+            body_h = max(0.5, y_body_bot - y_body_top)
+            out.append(
+                f'<rect x="{x_left:.1f}" y="{y_body_top:.1f}" '
+                f'width="{width_px}" height="{body_h:.1f}" '
+                f'fill="{color}" fill-opacity="0.25" '
+                f'stroke="{color}" stroke-width="1.5"/>'
+            )
+
+            # Median tick — solid, slightly thicker than the whisker.
+            out.append(
+                f'<line x1="{x_left:.1f}" y1="{y_med:.1f}" '
+                f'x2="{x_right:.1f}" y2="{y_med:.1f}" '
+                f'stroke="{color}" stroke-width="2"/>'
+            )
+
+            if show_dots:
+                for t, v in b["samples"]:
+                    if not axis.is_visible(v):
+                        continue
+                    out.append(
+                        f'<circle cx="{self.x_pixel(t):.1f}" '
+                        f'cy="{self.y_pixel(v, axis):.1f}" '
+                        f'r="2" fill="{color}" fill-opacity="0.5"/>'
+                    )
+
+            if show_labels:
+                start = datetime.fromtimestamp(b["t_start"]).strftime("%H:%M:%S")
+                lines = [
+                    f"N={b['n']}",
+                    f"start={start}",
+                    f"min={fmt(b['min'])}",
+                    f"max={fmt(b['max'])}",
+                    f"med={fmt(b['median'])}",
+                    f"σ={fmt(b['stdev'])}",
+                ]
+                label_x = x_right + 4
+                label_y = y_top + label_font
+                out.append(
+                    f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
+                    f'font-size="{label_font:.1f}" fill="{color}">'
+                )
+                for i, ln in enumerate(lines):
+                    dy = "0" if i == 0 else f"{label_line_h:.1f}"
+                    out.append(
+                        f'<tspan x="{label_x:.1f}" dy="{dy}">'
+                        f'{_xml_escape(ln)}</tspan>'
+                    )
+                out.append('</text>')
+
+        return out
+
 
 def render(left_series, right_series, log_y=False,
            width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT,
-           styles=None, labels=None):
+           styles=None, labels=None,
+           box_width_px=DEFAULT_BOX_WIDTH_PX,
+           box_show_dots=False, box_show_labels=False):
     """Render N left-axis + M right-axis series into a complete SVG.
 
-    ``left_series`` and ``right_series`` are each a list of
-    ``(kind, points)`` tuples. All series on the same axis must share a
-    kind (all ping, or all curl), because a y-axis carries one unit.
-    Cross-axis can mix freely — that's the whole point of having two
-    axes.
+    ``left_series`` and ``right_series`` are each a list of ``Series``
+    objects. All series on the same axis must share a kind (all ping, or
+    all curl), because a y-axis carries one unit. Cross-axis can mix
+    freely — that's the whole point of having two axes. Mode mixing
+    within an axis is fine: a curl dots-series can sit alongside a
+    curl boxes-series since both speak Speed (B/s).
 
     Chart shapes follow from the counts:
       * N=1, M=0   single-series chart, frame & axis tinted to the colour.
@@ -757,9 +1022,10 @@ def render(left_series, right_series, log_y=False,
 
     ``styles`` is one matplotlib-style string per series in
     left-then-right order; if shorter than the series count the last
-    entry is recycled. ``labels`` is one legend entry per series in the
-    same order (None → no legend, or filename basenames if the caller
-    chooses).
+    entry is recycled. For box-mode series only the colour code is
+    honoured (line/marker codes are silently ignored). ``labels`` is one
+    legend entry per series in the same order (None → no legend, or
+    filename basenames if the caller chooses).
     """
     n_left = len(left_series)
     n_right = len(right_series)
@@ -769,7 +1035,7 @@ def render(left_series, right_series, log_y=False,
     # A y-axis labels one unit, so each side must be one kind. The
     # cross-axis case is exactly what gets the two axes.
     for side_name, group in (("left", left_series), ("right", right_series)):
-        kinds = {k for k, _ in group}
+        kinds = {s.kind for s in group}
         if len(kinds) > 1:
             raise ValueError(
                 f"{side_name}-axis files must all be the same kind "
@@ -786,12 +1052,18 @@ def render(left_series, right_series, log_y=False,
     left_parsed = parsed[:n_left]
     right_parsed = parsed[n_left:]
 
-    all_xs = [t for _, pts in all_series for t, _ in pts]
+    all_xs = [t for s in all_series for t, _ in s.points]
     plot = Plot(min(all_xs), max(all_xs), width=width, height=height)
 
     out = plot.header()
 
-    markers_used = sorted({m for _, m, _ in parsed if m is not None})
+    # Only collect markers that will actually be drawn (dot series only —
+    # box series synthesize their own SVG and don't use the marker defs).
+    markers_used = sorted({
+        m
+        for s, (_, m, _) in zip(all_series, parsed)
+        if s.mode == "dots" and m is not None
+    })
     if markers_used:
         out.append("<defs>" + "".join(MARKER_DEFS[m] for m in markers_used) + "</defs>")
 
@@ -799,17 +1071,27 @@ def render(left_series, right_series, log_y=False,
 
     def _draw_side(side_series, side_parsed, side_name):
         """Draw one axis and every series on it."""
-        kind = side_series[0][0]
-        all_vals = [v for _, pts in side_series for _, v in pts]
+        kind = side_series[0].kind
+        all_vals = [v for s in side_series for _, v in s.points]
         axis = Axis(kind, all_vals, log=log_y)
         # When a side carries exactly one series, tint its spine/label
         # to that series' colour (original 1- and 1+1-series look). With
         # multiple series the colour belongs to the legend, not the axis.
         axis_color = side_parsed[0][2] if len(side_series) == 1 else "black"
         lines = plot.y_axis(axis, side=side_name, color=axis_color)
-        for (_, pts), (linestyle, marker, color) in zip(side_series, side_parsed):
-            lines += plot.series(pts, axis, color=color,
-                                 linestyle=linestyle, marker=marker)
+        for s, (linestyle, marker, color) in zip(side_series, side_parsed):
+            if s.mode == "boxes":
+                lines += plot.boxes(
+                    s.bursts, axis, color=color, kind=s.kind,
+                    width_px=box_width_px,
+                    show_dots=box_show_dots,
+                    show_labels=box_show_labels,
+                )
+            else:
+                lines += plot.series(
+                    s.points, axis, color=color,
+                    linestyle=linestyle, marker=marker,
+                )
         return axis_color, lines
 
     if double_y:
@@ -831,7 +1113,7 @@ def render(left_series, right_series, log_y=False,
                 f"got {len(labels)} legend labels for {len(all_series)} series"
             )
         entries = [
-            (labels[i], parsed[i][2], parsed[i][0], parsed[i][1])
+            (labels[i], parsed[i][2], parsed[i][0], parsed[i][1], all_series[i].mode)
             for i in range(len(all_series))
         ]
         out += plot.legend(entries)
@@ -858,7 +1140,7 @@ SVG_TO_PNG_TOOLS = [
 
 
 def auto_output_path(series_list):
-    kinds = {k for k, _ in series_list}
+    kinds = {s.kind for s in series_list}
     prefix = kinds.pop() if len(kinds) == 1 else "combined"
     ts = datetime.now().strftime(TIMESTAMP_FORMAT)
     return os.path.join(str(OUTPUT_DIR), f"{prefix}-{ts}.svg")
@@ -1021,29 +1303,57 @@ def _stamp(buf):
 def cmd_plot(args):
     # Positionals default to the left axis (the common case: one or more
     # same-kind recordings stack on one y-scale). --left appends more,
-    # --right opens a second y-axis; both can repeat.
+    # --right opens a second y-axis; both can repeat. --boxes lands on
+    # the right axis (its natural home — boxes summarize curl/speed
+    # data, which conventionally sits opposite the ping data).
     left_paths = list(args.files or []) + list(args.left or [])
     right_paths = list(args.right or [])
+    box_paths = list(args.boxes or [])
 
-    # A `--right`-only invocation is almost certainly user error (an
-    # off-side single chart looks broken), but rather than reject it,
-    # fold it back onto the left so they still get something useful.
-    if not left_paths and right_paths:
-        left_paths, right_paths = right_paths, []
-
-    if not left_paths and not right_paths:
-        sys.exit("error: no input files (pass paths positionally or via --left/--right)")
+    if not left_paths and not right_paths and not box_paths:
+        sys.exit("error: no input files (pass paths positionally or via "
+                 "--left/--right/--boxes)")
 
     try:
-        left_series = [parse_recording(p) for p in left_paths]
-        right_series = [parse_recording(p) for p in right_paths]
+        left_dot_recs = [parse_recording(p) for p in left_paths]
+        right_dot_recs = [parse_recording(p) for p in right_paths]
+        box_recs = [parse_recording(p) for p in box_paths]
     except (FileNotFoundError, ValueError) as e:
         sys.exit(str(e))
+
+    # Segment & summarize each box file's samples into bursts. With
+    # default ping-load output (~3 samples per burst, 30 min apart),
+    # 60 s gap + min-samples 1 catches every burst cleanly.
+    box_series = []
+    for (kind, points) in box_recs:
+        bursts_raw = segment_bursts(points, args.box_gap, args.box_min_samples)
+        bursts = [summarize_burst(b) for b in bursts_raw]
+        box_series.append(Series(kind, points, mode="boxes", bursts=bursts))
+
+    left_series = [Series(k, pts, mode="dots") for k, pts in left_dot_recs]
+    right_series = [Series(k, pts, mode="dots") for k, pts in right_dot_recs]
+
+    # Boxes default to the right axis when there's any left content;
+    # otherwise they ARE the chart and become the single (left-folded)
+    # series set.
+    if left_series:
+        right_series = right_series + box_series
+    else:
+        # No left content. Right-axis dots (if any) and box series both
+        # fold onto the single axis — keeps the chart from looking
+        # half-empty against an unused left frame.
+        left_series = right_series + box_series
+        right_series = []
 
     # Default the legend to file basenames whenever there's more than
     # one series — otherwise readers can't tell which curve is which.
     # Single-series charts stay un-labelled by default (no legend box).
-    all_paths = left_paths + right_paths
+    # Order must match left_series + right_series above so legend
+    # entries and styles line up with the series they describe.
+    if left_paths:
+        all_paths = left_paths + right_paths + box_paths
+    else:
+        all_paths = right_paths + box_paths
     labels = args.legend
     if labels is None and len(all_paths) > 1:
         labels = [os.path.splitext(os.path.basename(p))[0] for p in all_paths]
@@ -1059,6 +1369,9 @@ def cmd_plot(args):
             width=args.width, height=args.height,
             styles=args.style,
             labels=labels,
+            box_width_px=args.box_width,
+            box_show_dots=args.box_show_dots,
+            box_show_labels=args.box_label,
         )
     except ValueError as e:
         sys.exit(str(e))

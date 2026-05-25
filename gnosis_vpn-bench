@@ -21,6 +21,7 @@ import sys
 from config import DEFAULT_RUNS, DEFAULT_WARMUP_S, DEFAULT_WAIT_BETWEEN_S, LOG_DIR, LOG_FILE
 from modes import cmd_gap, cmd_locations, cmd_ramp, cmd_repeated
 from monitor import (
+    DEFAULT_BOX_GAP_S, DEFAULT_BOX_MIN_SAMPLES, DEFAULT_BOX_WIDTH_PX,
     DEFAULT_CURL_FILE, DEFAULT_CURL_URL,
     DEFAULT_HEIGHT, DEFAULT_PING_FILE, DEFAULT_PING_HOST,
     DEFAULT_PING_LOAD_CURL_URL, DEFAULT_PING_LOAD_INTERVAL_MIN,
@@ -129,6 +130,34 @@ modes:
                         help="add a file to the right y-axis (repeatable). "
                              "Presence of --right makes the chart double-y; "
                              "all right-axis files must be the same kind.")
+    p_plot.add_argument("--boxes", action="append", metavar="FILE",
+                        help="render this curl/speed file as one box per "
+                             "burst (whisker = min/max, body = mean±σ, "
+                             "tick = median). Boxes land on the right "
+                             "axis when other data is present; if --boxes "
+                             "is the only input they ARE the chart.")
+    p_plot.add_argument("--box-gap", type=float, default=DEFAULT_BOX_GAP_S,
+                        metavar="SECONDS",
+                        help=f"sample-gap threshold splitting bursts "
+                             f"(default: {DEFAULT_BOX_GAP_S} s — far above "
+                             f"any plausible intra-burst gap, far below the "
+                             f"30-min ping-load default)")
+    p_plot.add_argument("--box-min-samples", type=int,
+                        default=DEFAULT_BOX_MIN_SAMPLES, metavar="N",
+                        help=f"drop bursts with fewer than N samples "
+                             f"(default: {DEFAULT_BOX_MIN_SAMPLES} — even "
+                             f"degenerate single-sample bursts are drawn)")
+    p_plot.add_argument("--box-width", type=int, default=DEFAULT_BOX_WIDTH_PX,
+                        metavar="PIXELS",
+                        help=f"box width in pixels, fixed regardless of "
+                             f"x-range (default: {DEFAULT_BOX_WIDTH_PX})")
+    p_plot.add_argument("--box-show-dots", action="store_true",
+                        help="overlay each burst's raw samples as small "
+                             "translucent dots — handy for verifying the "
+                             "summary matches the data")
+    p_plot.add_argument("--box-label", action="store_true",
+                        help="print N / start time / min / max / median / σ "
+                             "next to each box")
     p_plot.add_argument("--log-y", action="store_true",
                         help="logarithmic y-axis (applies to both sides)")
     p_plot.add_argument("-o", "--output", default=None,

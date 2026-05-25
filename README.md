@@ -209,9 +209,81 @@ recording kind is auto-detected from each file's contents.
 
 With no `-o` the chart is written under `output/` with a timestamped
 filename plus a sibling PNG (requires `rsvg-convert`, ImageMagick or
-Inkscape on `PATH`; falls back to SVG-only if none is found). `--log-y`,
-`--legend`, `--width`, `--height`, `--png-scale` are also accepted — see
-`./gnosis_vpn-bench plot --help` for the full list.
+Inkscape on `PATH`; falls back to SVG-only if none is found).
+`--legend`, `--width`, `--height`, `--png-scale` are also accepted —
+see `./gnosis_vpn-bench plot --help` for the full list.
+
+#### Log-scale y-axis (`--log-y`)
+
+Apply a base-10 log scale to *both* y-axes. Useful when one series
+spans several orders of magnitude (typical for `ramp` results mixing
+50 KB and 50 MB transfers, or any chart where small and large values
+would otherwise be crushed against the axis):
+
+```bash
+./gnosis_vpn-bench plot data/ping--TS.txt --right data/speed--TS.txt --log-y
+```
+
+Non-positive samples are skipped on a log axis (a whole series of
+zeros/negatives errors out with a clear message). Minor decade-internal
+ticks appear automatically when the visible range spans fewer than
+four decades.
+
+#### Box plots (`--boxes`)
+
+`--boxes FILE` renders a curl/speed recording as one box per burst
+instead of one dot per progress sample. Designed for `ping-load`
+output, where each 10 MB burst emits a tight cluster of sub-second
+samples that collapses into a visually unreadable column at session
+time-scale.
+
+```bash
+# Right-axis box plot alongside ping data on the left
+./gnosis_vpn-bench plot data/ping--TS.txt --boxes data/speed--TS.txt
+
+# Boxes alone — no left- or right-axis dot data
+./gnosis_vpn-bench plot --boxes data/speed--TS.txt
+
+# Two sessions overlaid (VPN vs no-VPN)
+./gnosis_vpn-bench plot \
+    --left  data/ping-vpn.txt    --left  data/ping-novpn.txt \
+    --boxes data/speed-vpn.txt   --boxes data/speed-novpn.txt \
+    --style b1 --style b3 --style r1 --style r3 \
+    --legend "ping VPN"  --legend "ping no-VPN" \
+    --legend "speed VPN" --legend "speed no-VPN"
+```
+
+Box anatomy per burst:
+
+| element | encodes |
+|---------|---------|
+| whisker (vertical line with caps) | `min` / `max` |
+| translucent body rectangle | `mean ± 1σ` (population σ, so the body always sits inside the whisker) |
+| solid horizontal tick | `median` |
+
+Bursts are auto-detected from the time gap between successive samples
+in the recording — `--box-gap SECONDS` is the threshold. At default
+`ping-load` parameters (intra-burst samples sub-second, 30-minute
+inter-burst idle), any threshold from 1 s to ~1700 s works; the 60 s
+default leaves both bounds comfortably far away.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--box-gap` | `60` | Sample-gap threshold (seconds) that splits bursts |
+| `--box-min-samples` | `1` | Drop bursts with fewer than N samples (1 = even degenerate single-sample boxes draw) |
+| `--box-width` | `10` | Box width in pixels (fixed; not scaled to burst duration, which would render sub-pixel at session scale) |
+| `--box-show-dots` | off | Overlay each burst's raw samples as small translucent dots — useful for verifying the summary matches the data |
+| `--box-label` | off | Print `N` / start time / `min` / `max` / `median` / `σ` next to each box |
+
+For `--style` on a box series, only the colour code is honoured;
+linestyle and marker codes are silently ignored (a box has neither).
+The legend swatch for a box series is a miniature box icon rather than
+a line+marker sample.
+
+Box files normally land on the **right axis** when there's any other
+data on the chart. If `--boxes` is the only input (no `--left`, no
+positional, no `--right`), the boxes ARE the chart and occupy a single
+tinted axis — same shape as a single-series ping chart.
 
 #### Style strings (`--style`)
 
