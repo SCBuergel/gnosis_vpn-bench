@@ -310,7 +310,7 @@ def format_bits_per_second(v):
     return f"{v:.0f}"
 
 
-KIND_LABEL = {"ping": "RTT (ms)", "curl": "Speed (bits/s)"}
+KIND_LABEL = {"ping": "RTT (ms)", "curl": "Throughput (bits/s)"}
 KIND_FORMATTER = {"ping": format_ms, "curl": format_bits_per_second}
 
 
@@ -772,7 +772,7 @@ class Plot:
         if not show_date_row:
             cx = (MARGIN_LEFT + self.width - MARGIN_RIGHT) / 2
             out.append(
-                f'<text x="{cx}" y="{self.height - 10}" text-anchor="middle">time</text>'
+                f'<text x="{cx}" y="{self.height - 10}" text-anchor="middle">Time</text>'
             )
         return out
 
@@ -1095,7 +1095,7 @@ def render(left_series, right_series, log_y=False,
     all curl), because a y-axis carries one unit. Cross-axis can mix
     freely — that's the whole point of having two axes. Mode mixing
     within an axis is fine: a curl dots-series can sit alongside a
-    curl boxes-series since both speak Speed (bits/s).
+    curl boxes-series since both speak Throughput (bits/s).
 
     Chart shapes follow from the counts:
       * N=1, M=0   single-series chart, frame & axis tinted to the colour.
