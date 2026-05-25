@@ -264,13 +264,17 @@ Box anatomy per burst (standard Tukey five-number summary):
 
 **Outliers.** Before any of the five-number stats are computed, the
 burst's samples are passed through a single-pass outlier filter: any
-sample whose value differs from the median by more than 2σ (population
-σ on the *original* samples) is classified as an outlier. The filter
-runs **once** — σ is not recomputed after removal, so a borderline
-second outlier doesn't get promoted by a shrinking-σ feedback loop.
-Inliers feed every reported stat (`min`, `Q1`, `median`, `Q3`, `max`);
-outliers are still drawn, as standalone `*` markers in the box's
-colour, so they remain visible without distorting the summary.
+sample whose value differs from the median by more than `N×σ` (with
+`N` set by `--box-outlier-sigma`, default `2.0`, and σ the population
+standard deviation of the *original* samples) is classified as an
+outlier. The filter runs **once** — σ is not recomputed after removal,
+so a borderline second outlier doesn't get promoted by a shrinking-σ
+feedback loop. Inliers feed every reported stat (`min`, `Q1`,
+`median`, `Q3`, `max`); outliers are still drawn, as standalone `*`
+markers in the box's colour, so they remain visible without distorting
+the summary. At `--log-level DEBUG` each burst header logs the
+pre-removal median, σ and threshold so the classification can be
+verified arithmetically against the listed raw samples.
 
 Bursts are auto-detected from the time gap between successive samples
 in the recording — `--box-gap SECONDS` is the threshold. At default
@@ -290,6 +294,7 @@ dropped.
 | `--box-gap` | `60` | Sample-gap threshold (seconds) that splits bursts |
 | `--box-min-samples` | `1` | Drop bursts with fewer than N samples (1 = even degenerate single-sample boxes draw) |
 | `--box-width` | `10` | Box width in pixels (fixed; not scaled to burst duration, which would render sub-pixel at session scale) |
+| `--box-outlier-sigma` | `2.0` | σ multiplier for the outlier threshold (samples more than N×σ from the burst median are flagged) |
 | `--box-show-dots` | off | Overlay each burst's raw samples as small translucent dots — useful for verifying the summary matches the data |
 | `--box-label` | off | Print `N` / start time / `min` / `q1` / `median` / `q3` / `max` next to each box |
 

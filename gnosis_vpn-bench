@@ -21,7 +21,8 @@ import sys
 from config import DEFAULT_RUNS, DEFAULT_WARMUP_S, DEFAULT_WAIT_BETWEEN_S, LOG_DIR, LOG_FILE
 from modes import cmd_gap, cmd_locations, cmd_ramp, cmd_repeated
 from monitor import (
-    DEFAULT_BOX_GAP_S, DEFAULT_BOX_MIN_SAMPLES, DEFAULT_BOX_WIDTH_PX,
+    DEFAULT_BOX_GAP_S, DEFAULT_BOX_MIN_SAMPLES, DEFAULT_BOX_OUTLIER_SIGMA,
+    DEFAULT_BOX_WIDTH_PX,
     DEFAULT_CURL_FILE, DEFAULT_CURL_URL,
     DEFAULT_HEIGHT, DEFAULT_PING_FILE, DEFAULT_PING_HOST,
     DEFAULT_PING_LOAD_CURL_URL, DEFAULT_PING_LOAD_INTERVAL_MIN,
@@ -165,6 +166,15 @@ modes:
                         metavar="PIXELS",
                         help=f"box width in pixels, fixed regardless of "
                              f"x-range (default: {DEFAULT_BOX_WIDTH_PX})")
+    p_plot.add_argument("--box-outlier-sigma", type=float,
+                        default=DEFAULT_BOX_OUTLIER_SIGMA, metavar="N",
+                        help=f"σ multiplier defining the outlier threshold: "
+                             f"samples more than N×σ from the burst median "
+                             f"are flagged as outliers and drawn as "
+                             f"separate ``*`` markers (default: "
+                             f"{DEFAULT_BOX_OUTLIER_SIGMA}). The σ is "
+                             f"computed once on the original samples; the "
+                             f"filter does not iterate.")
     p_plot.add_argument("--box-show-dots", action="store_true",
                         help="overlay each burst's raw samples as small "
                              "translucent dots — handy for verifying the "

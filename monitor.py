@@ -91,6 +91,7 @@ DEFAULT_PING_LOAD_CURL_URL = (
 DEFAULT_BOX_GAP_S = 60
 DEFAULT_BOX_MIN_SAMPLES = 1
 DEFAULT_BOX_WIDTH_PX = 10
+DEFAULT_BOX_OUTLIER_SIGMA = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +203,7 @@ def _quantile(values_sorted, p):
     return values_sorted[lo] + (h - lo) * (values_sorted[hi] - values_sorted[lo])
 
 
-def summarize_burst(samples):
+def summarize_burst(samples, outlier_sigma=DEFAULT_BOX_OUTLIER_SIGMA):
     """Reduce a burst (list of ``(t, v)``) to box-plot summary stats.
 
     Returns the standard five-number summary (min, Q1, median, Q3, max)
@@ -212,11 +213,15 @@ def summarize_burst(samples):
     to the single value.
 
     Outlier handling: any sample whose value differs from the median by
-    more than 2σ (population σ of the *original* samples) is treated as
-    an outlier — single pass, NOT iterative. Inliers feed every reported
-    stat (min, Q1, median, Q3, max); outliers are returned separately so
-    the renderer can plot them as standalone ``*`` markers alongside
-    the box.
+    more than ``outlier_sigma`` × σ (population σ of the *original*
+    samples) is treated as an outlier — single pass, NOT iterative.
+    Inliers feed every reported stat (min, Q1, median, Q3, max);
+    outliers are returned separately so the renderer can plot them as
+    standalone ``*`` markers alongside the box.
+
+    The pre-removal median, σ and threshold are exposed in the returned
+    dict (``median_pre``, ``sigma_pre``, ``threshold``) so callers /
+    debug logs can reproduce the outlier-classification arithmetic.
     """
     n_all = len(samples)
     vs_all_sorted = sorted(v for _, v in samples)
@@ -226,17 +231,17 @@ def summarize_burst(samples):
     # after dropping outliers — the user specifically asked for a
     # single-pass filter (so a borderline second outlier doesn't get
     # promoted by the shrinking-σ feedback loop).
-    median_initial = _quantile(vs_all_sorted, 0.5)
-    mean_initial = sum(vs_all_sorted) / n_all
-    sigma_initial = math.sqrt(
-        sum((v - mean_initial) ** 2 for v in vs_all_sorted) / n_all
+    median_pre = _quantile(vs_all_sorted, 0.5)
+    mean_pre = sum(vs_all_sorted) / n_all
+    sigma_pre = math.sqrt(
+        sum((v - mean_pre) ** 2 for v in vs_all_sorted) / n_all
     )
-    threshold = 2 * sigma_initial
+    threshold = outlier_sigma * sigma_pre
 
     inliers = [(t, v) for (t, v) in samples
-               if abs(v - median_initial) <= threshold]
+               if abs(v - median_pre) <= threshold]
     outliers = [(t, v) for (t, v) in samples
-                if abs(v - median_initial) > threshold]
+                if abs(v - median_pre) > threshold]
     # By construction at least one sample (the one closest to the
     # median) survives the threshold check, so inliers is never empty —
     # even for the σ=0 edge case (all values identical, threshold=0,
@@ -261,6 +266,9 @@ def summarize_burst(samples):
         "q1": _quantile(inlier_vs_sorted, 0.25),
         "median": _quantile(inlier_vs_sorted, 0.5),
         "q3": _quantile(inlier_vs_sorted, 0.75),
+        "median_pre": median_pre,
+        "sigma_pre": sigma_pre,
+        "threshold": threshold,
     }
 
 
@@ -1409,7 +1417,8 @@ def cmd_plot(args):
                 bursts_filtered.append(kept)
             else:
                 dropped_bursts += 1
-        bursts = [summarize_burst(b) for b in bursts_filtered]
+        bursts = [summarize_burst(b, outlier_sigma=args.box_outlier_sigma)
+                  for b in bursts_filtered]
         # Pass only the kept samples through Series.points so the
         # y-axis range computation in render() doesn't pin the bottom
         # of the chart at 0 (which would defeat the whole point of
@@ -1418,22 +1427,32 @@ def cmd_plot(args):
         box_series.append(Series(kind, kept_points, mode="boxes", bursts=bursts))
         log.debug(
             "boxes: %s — %d bursts from %d samples "
-            "(gap=%gs, min_samples=%d, zeros dropped=%d, "
+            "(gap=%gs, min_samples=%d, outlier σ=%g, zeros dropped=%d, "
             "empty bursts dropped=%d)",
             path, len(bursts), len(points),
-            args.box_gap, args.box_min_samples,
+            args.box_gap, args.box_min_samples, args.box_outlier_sigma,
             dropped_zeros, dropped_bursts,
         )
         fmt = KIND_FORMATTER.get(kind, lambda v: f"{v:g}")
         for i, kept in enumerate(bursts_filtered):
             s = bursts[i]
+            # Two distinct medians here:
+            #   * median_pre  — used as the outlier-threshold centre
+            #   * median      — recomputed from inliers, drawn on the box
+            # They're identical when outliers=0; they differ once a
+            # sample gets flagged. Showing both lets the user verify
+            # each outlier classification arithmetically against the
+            # raw samples logged below.
             log.debug(
-                "  burst %d  N=%d  start=%s  min=%s  q1=%s  median=%s  "
-                "q3=%s  max=%s  outliers=%d",
+                "  burst %d  N=%d  start=%s  median=%s  q1=%s  q3=%s  "
+                "min=%s  max=%s  outliers=%d  "
+                "[pre-outlier: median=%s σ=%s threshold=±%s]",
                 i, s["n"],
                 datetime.fromtimestamp(s["t_start"]).strftime("%H:%M:%S"),
-                fmt(s["min"]), fmt(s["q1"]), fmt(s["median"]),
-                fmt(s["q3"]), fmt(s["max"]), len(s["outliers"]),
+                fmt(s["median"]), fmt(s["q1"]), fmt(s["q3"]),
+                fmt(s["min"]), fmt(s["max"]), len(s["outliers"]),
+                fmt(s["median_pre"]), fmt(s["sigma_pre"]),
+                fmt(s["threshold"]),
             )
             for t, v in s["samples"]:
                 log.debug(
@@ -1443,9 +1462,9 @@ def cmd_plot(args):
                 )
             for t, v in s["outliers"]:
                 log.debug(
-                    "    [%s] %s  (outlier, >2σ from median)",
+                    "    [%s] %s  (outlier, >%gσ from median)",
                     datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3],
-                    fmt(v),
+                    fmt(v), args.box_outlier_sigma,
                 )
 
     left_series = [Series(k, pts, mode="dots") for k, pts in left_dot_recs]
