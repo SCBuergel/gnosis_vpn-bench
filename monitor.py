@@ -91,7 +91,7 @@ DEFAULT_PING_LOAD_CURL_URL = (
 DEFAULT_BOX_GAP_S = 60
 DEFAULT_BOX_MIN_SAMPLES = 1
 DEFAULT_BOX_WIDTH_PX = 10
-DEFAULT_BOX_OUTLIER_SIGMA = 2.0
+DEFAULT_BOX_OUTLIER_SIGMA = 3.0
 
 
 # ---------------------------------------------------------------------------
@@ -282,17 +282,27 @@ def format_ms(v):
     return f"{v:g}"
 
 
-def format_bytes_per_second(v):
+def format_bits_per_second(v):
+    """Format a speed sample (internally bytes/sec) as a bit-rate string.
+
+    curl reports speed in bytes/sec and we store it that way internally
+    (so ``parse_speed`` stays curl-faithful), but bandwidth is
+    conventionally read in bits, so display always multiplies by 8.
+    Suffixes are decimal SI (k = 1e3, M = 1e6, G = 1e9) — what a
+    networking reader expects from "Mbit/s", not the binary 2¹⁰ /
+    2²⁰ / 2³⁰ that "MB" sometimes implies.
+    """
     if v <= 0:
         return "0"
+    bits = v * 8
     for unit, suffix in ((1e9, "G"), (1e6, "M"), (1e3, "k")):
-        if v >= unit:
-            return f"{v / unit:.3g}{suffix}"
-    return f"{v:.0f}"
+        if bits >= unit:
+            return f"{bits / unit:.3g}{suffix}"
+    return f"{bits:.0f}"
 
 
-KIND_LABEL = {"ping": "RTT (ms)", "curl": "Speed (B/s)"}
-KIND_FORMATTER = {"ping": format_ms, "curl": format_bytes_per_second}
+KIND_LABEL = {"ping": "RTT (ms)", "curl": "Speed (bits/s)"}
+KIND_FORMATTER = {"ping": format_ms, "curl": format_bits_per_second}
 
 
 # ---------------------------------------------------------------------------
@@ -1076,7 +1086,7 @@ def render(left_series, right_series, log_y=False,
     all curl), because a y-axis carries one unit. Cross-axis can mix
     freely — that's the whole point of having two axes. Mode mixing
     within an axis is fine: a curl dots-series can sit alongside a
-    curl boxes-series since both speak Speed (B/s).
+    curl boxes-series since both speak Speed (bits/s).
 
     Chart shapes follow from the counts:
       * N=1, M=0   single-series chart, frame & axis tinted to the colour.
