@@ -185,24 +185,34 @@ def segment_bursts(points, gap_seconds, min_samples):
     return bursts
 
 
-def summarize_burst(samples):
-    """Reduce a burst (list of ``(t, v)``) to a dict of summary stats.
+def _quantile(values_sorted, p):
+    """Linear-interpolation quantile (R type 7 / numpy/pandas default).
 
-    Population standard deviation (divisor n, not n-1) is used so the
-    body of the box ``[mean-σ, mean+σ]`` is always contained within the
-    whisker range ``[min, max]`` for any sample count ≥ 2 — keeps the
-    visual invariant simple. For N=1 the box collapses to a point.
+    Inputs must already be sorted. ``p`` is the cumulative probability
+    in [0, 1]. For N=1 returns the lone value.
     """
-    vs = [v for _, v in samples]
-    n = len(vs)
-    vs_sorted = sorted(vs)
-    if n % 2:
-        vmed = vs_sorted[n // 2]
-    else:
-        vmed = (vs_sorted[n // 2 - 1] + vs_sorted[n // 2]) / 2
-    vmean = sum(vs) / n
-    var = sum((v - vmean) ** 2 for v in vs) / n
-    vstd = math.sqrt(var)
+    n = len(values_sorted)
+    if n == 1:
+        return values_sorted[0]
+    h = p * (n - 1)
+    lo = math.floor(h)
+    hi = math.ceil(h)
+    if lo == hi:
+        return values_sorted[lo]
+    return values_sorted[lo] + (h - lo) * (values_sorted[hi] - values_sorted[lo])
+
+
+def summarize_burst(samples):
+    """Reduce a burst (list of ``(t, v)``) to box-plot summary stats.
+
+    Returns the standard five-number summary (min, Q1, median, Q3, max)
+    plus N and the original sample list (for ``--box-show-dots``).
+    Q1/Q3 use linear-interpolation quantiles (R type 7) so the IQR
+    always sits inside ``[min, max]``. For N=1 every quantile collapses
+    to the single value.
+    """
+    vs_sorted = sorted(v for _, v in samples)
+    n = len(vs_sorted)
     ts = [t for t, _ in samples]
     return {
         "n": n,
@@ -211,9 +221,9 @@ def summarize_burst(samples):
         "t_center": ts[len(ts) // 2] if n % 2 else (ts[n // 2 - 1] + ts[n // 2]) / 2,
         "min": vs_sorted[0],
         "max": vs_sorted[-1],
-        "median": vmed,
-        "mean": vmean,
-        "stdev": vstd,
+        "q1": _quantile(vs_sorted, 0.25),
+        "median": _quantile(vs_sorted, 0.5),
+        "q3": _quantile(vs_sorted, 0.75),
     }
 
 
@@ -888,9 +898,9 @@ class Plot:
               show_dots=False, show_labels=False):
         """Draw one box per burst at ``b["t_center"]`` on the value axis.
 
-        Anatomy per box:
+        Anatomy per box (standard Tukey shape):
           * vertical whisker from ``min`` to ``max`` with horizontal caps
-          * translucent body rectangle from ``mean-σ`` to ``mean+σ``
+          * translucent body rectangle from ``Q1`` to ``Q3`` (IQR)
           * solid horizontal median tick across the body
           * (optional) raw samples as small translucent dots
           * (optional) multi-line stat label to the right of the box
@@ -916,14 +926,10 @@ class Plot:
             cx = self.x_pixel(b["t_center"])
             x_left = cx - half
             x_right = cx + half
-            # Population σ keeps the body inside [min, max] for n≥1, but
-            # be defensive in case a future change flips to sample σ.
-            body_lo = max(b["min"], b["mean"] - b["stdev"])
-            body_hi = min(b["max"], b["mean"] + b["stdev"])
             y_top = self.y_pixel(b["max"], axis)
             y_bot = self.y_pixel(b["min"], axis)
-            y_body_top = self.y_pixel(body_hi, axis)
-            y_body_bot = self.y_pixel(body_lo, axis)
+            y_body_top = self.y_pixel(b["q3"], axis)
+            y_body_bot = self.y_pixel(b["q1"], axis)
             y_med = self.y_pixel(b["median"], axis)
 
             # Whisker line + caps (use 1.5 px stroke — thinner than series
@@ -944,8 +950,9 @@ class Plot:
                 f'stroke="{color}" stroke-width="1.5"/>'
             )
 
-            # Body rect. Ensure a minimum visible height so N=1 / zero-σ
-            # bursts still draw something the eye can see.
+            # Body rect. Enforce a minimum visible height so N=1 or
+            # degenerate-IQR bursts (all samples equal) still draw
+            # something the eye can see.
             body_h = max(0.5, y_body_bot - y_body_top)
             out.append(
                 f'<rect x="{x_left:.1f}" y="{y_body_top:.1f}" '
@@ -977,9 +984,10 @@ class Plot:
                     f"N={b['n']}",
                     f"start={start}",
                     f"min={fmt(b['min'])}",
-                    f"max={fmt(b['max'])}",
+                    f"q1={fmt(b['q1'])}",
                     f"med={fmt(b['median'])}",
-                    f"σ={fmt(b['stdev'])}",
+                    f"q3={fmt(b['q3'])}",
+                    f"max={fmt(b['max'])}",
                 ]
                 label_x = x_right + 4
                 label_y = y_top + label_font
@@ -1368,12 +1376,12 @@ def cmd_plot(args):
         for i, kept in enumerate(bursts_filtered):
             s = bursts[i]
             log.debug(
-                "  burst %d  N=%d  start=%s  min=%s  max=%s  median=%s  "
-                "mean=%s  σ=%s",
+                "  burst %d  N=%d  start=%s  min=%s  q1=%s  median=%s  "
+                "q3=%s  max=%s",
                 i, s["n"],
                 datetime.fromtimestamp(s["t_start"]).strftime("%H:%M:%S"),
-                fmt(s["min"]), fmt(s["max"]), fmt(s["median"]),
-                fmt(s["mean"]), fmt(s["stdev"]),
+                fmt(s["min"]), fmt(s["q1"]), fmt(s["median"]),
+                fmt(s["q3"]), fmt(s["max"]),
             )
             for t, v in kept:
                 log.debug(

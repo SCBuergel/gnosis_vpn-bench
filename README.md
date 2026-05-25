@@ -253,13 +253,13 @@ time-scale.
     --legend "speed VPN" --legend "speed no-VPN"
 ```
 
-Box anatomy per burst:
+Box anatomy per burst (standard Tukey five-number summary):
 
 | element | encodes |
 |---------|---------|
 | whisker (vertical line with caps) | `min` / `max` |
-| translucent body rectangle | `mean ± 1σ` (population σ, so the body always sits inside the whisker) |
-| solid horizontal tick | `median` |
+| translucent body rectangle | `Q1` → `Q3` (interquartile range, R type 7 linear interpolation) |
+| solid horizontal tick | `median` (`Q2`) |
 
 Bursts are auto-detected from the time gap between successive samples
 in the recording — `--box-gap SECONDS` is the threshold. At default
@@ -280,7 +280,7 @@ dropped.
 | `--box-min-samples` | `1` | Drop bursts with fewer than N samples (1 = even degenerate single-sample boxes draw) |
 | `--box-width` | `10` | Box width in pixels (fixed; not scaled to burst duration, which would render sub-pixel at session scale) |
 | `--box-show-dots` | off | Overlay each burst's raw samples as small translucent dots — useful for verifying the summary matches the data |
-| `--box-label` | off | Print `N` / start time / `min` / `max` / `median` / `σ` next to each box |
+| `--box-label` | off | Print `N` / start time / `min` / `q1` / `median` / `q3` / `max` next to each box |
 
 For `--style` on a box series, only the colour code is honoured;
 linestyle and marker codes are silently ignored (a box has neither).
