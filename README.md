@@ -267,6 +267,13 @@ in the recording — `--box-gap SECONDS` is the threshold. At default
 inter-burst idle), any threshold from 1 s to ~1700 s works; the 60 s
 default leaves both bounds comfortably far away.
 
+Non-positive samples (`v ≤ 0`) are dropped from every burst before
+summarization. curl's progress meter always emits a leading "0 B/s"
+sample at the start of each burst that would otherwise pin every
+whisker's minimum to 0 — wrong on linear axes and invisible on log-y.
+At `--log-level DEBUG` the per-file header reports how many zeros were
+dropped.
+
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--box-gap` | `60` | Sample-gap threshold (seconds) that splits bursts |

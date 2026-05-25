@@ -1325,22 +1325,47 @@ def cmd_plot(args):
     # default ping-load output (~3 samples per burst, 30 min apart),
     # 60 s gap + min-samples 1 catches every burst cleanly.
     #
-    # At log-level DEBUG we dump every raw sample that fed each burst
-    # so the user can eyeball-verify the box against the data — the
-    # whole reason `--log-level DEBUG` exists.
+    # Drop non-positive samples (v <= 0) from each burst before
+    # summarizing: curl's progress meter always emits a leading "0
+    # bytes/sec" sample at the start of every burst, which would
+    # otherwise pin every whisker's minimum to 0 — wrong on linear
+    # axes (the burst's actual minimum throughput is well above 0
+    # once data flows) and invisible on log-y anyway. Filtering after
+    # segmentation preserves gap-based burst boundaries.
+    #
+    # At log-level DEBUG we dump every (kept) raw sample that fed each
+    # burst so the user can eyeball-verify the box against the data —
+    # the whole reason `--log-level DEBUG` exists.
     box_series = []
     for path, (kind, points) in zip(box_paths, box_recs):
-        bursts_raw = segment_bursts(points, args.box_gap, args.box_min_samples)
-        bursts = [summarize_burst(b) for b in bursts_raw]
-        box_series.append(Series(kind, points, mode="boxes", bursts=bursts))
+        bursts_segmented = segment_bursts(points, args.box_gap, args.box_min_samples)
+        bursts_filtered = []
+        dropped_zeros = 0
+        dropped_bursts = 0
+        for burst in bursts_segmented:
+            kept = [(t, v) for t, v in burst if v > 0]
+            dropped_zeros += len(burst) - len(kept)
+            if len(kept) >= args.box_min_samples:
+                bursts_filtered.append(kept)
+            else:
+                dropped_bursts += 1
+        bursts = [summarize_burst(b) for b in bursts_filtered]
+        # Pass only the kept samples through Series.points so the
+        # y-axis range computation in render() doesn't pin the bottom
+        # of the chart at 0 (which would defeat the whole point of
+        # dropping zeros).
+        kept_points = [s for burst in bursts_filtered for s in burst]
+        box_series.append(Series(kind, kept_points, mode="boxes", bursts=bursts))
         log.debug(
             "boxes: %s — %d bursts from %d samples "
-            "(gap=%gs, min_samples=%d)",
+            "(gap=%gs, min_samples=%d, zeros dropped=%d, "
+            "empty bursts dropped=%d)",
             path, len(bursts), len(points),
             args.box_gap, args.box_min_samples,
+            dropped_zeros, dropped_bursts,
         )
         fmt = KIND_FORMATTER.get(kind, lambda v: f"{v:g}")
-        for i, raw in enumerate(bursts_raw):
+        for i, kept in enumerate(bursts_filtered):
             s = bursts[i]
             log.debug(
                 "  burst %d  N=%d  start=%s  min=%s  max=%s  median=%s  "
@@ -1350,7 +1375,7 @@ def cmd_plot(args):
                 fmt(s["min"]), fmt(s["max"]), fmt(s["median"]),
                 fmt(s["mean"]), fmt(s["stdev"]),
             )
-            for t, v in raw:
+            for t, v in kept:
                 log.debug(
                     "    [%s] %s",
                     datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3],
