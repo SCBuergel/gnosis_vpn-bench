@@ -285,6 +285,10 @@ data on the chart. If `--boxes` is the only input (no `--left`, no
 positional, no `--right`), the boxes ARE the chart and occupy a single
 tinted axis — same shape as a single-series ping chart.
 
+To verify each box matches its raw data, run with
+`--log-level DEBUG` — the per-burst samples are then dumped on stdout
+(see the **Log verbosity** section below).
+
 #### Style strings (`--style`)
 
 Each `--style` is one matplotlib-style format string, applied to series
@@ -404,6 +408,27 @@ All timing constants are near the top of `./gnosis_vpn-bench`:
 | `RAMP_GAP_S` | 60 | Gap between `ramp` sizes |
 | `GAP_WARMUP_S` | 60 | Warmup before first `gap` download |
 | `GAP_SCHEDULE` | `[0,0,5,10,...,55]` | Per-download gaps in `gap` mode |
+
+## Log verbosity
+
+The top-level `--log-level` flag controls stdout verbosity. Choices:
+`DEBUG`, `INFO` (default), `WARNING`, `ERROR`. The on-disk log file
+under `logs/` always captures `DEBUG` regardless of this setting — the
+flag only filters the terminal stream.
+
+```bash
+# Default — INFO and above on stdout
+./gnosis_vpn-bench plot --boxes data/speed--TS.txt
+
+# Verbose — dump every raw sample that fed each box, with its
+# timestamp, alongside the burst summary stats
+./gnosis_vpn-bench --log-level DEBUG plot --boxes data/speed--TS.txt
+```
+
+The DEBUG dump is structured as one line per box file, one indented
+line per burst, and one further-indented line per raw sample — so you
+can confirm each box visually by lining its anatomy up against the
+listed samples.
 
 ## Troubleshooting
 

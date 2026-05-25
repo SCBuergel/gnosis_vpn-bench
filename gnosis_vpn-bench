@@ -35,16 +35,24 @@ from monitor import (
 
 LOG_DIR.mkdir(exist_ok=True)
 
+# Two handlers, two different floors. The file always captures DEBUG
+# (so post-mortem the run is fully reconstructable) while stdout
+# defaults to INFO and is opened up to DEBUG via `--log-level DEBUG`
+# when the user wants to see e.g. per-burst raw samples on the console.
+_STDOUT_HANDLER = logging.StreamHandler(sys.stdout)
+_STDOUT_HANDLER.setLevel(logging.INFO)
+_FILE_HANDLER = logging.FileHandler(LOG_FILE, encoding="utf-8")
+_FILE_HANDLER.setLevel(logging.DEBUG)
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s.%(msecs)03d [%(levelname)-8s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-    ],
+    handlers=[_STDOUT_HANDLER, _FILE_HANDLER],
 )
 log = logging.getLogger("gnosis_speedtest")
+
+LOG_LEVEL_CHOICES = ["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +77,12 @@ modes:
     )
     parser.add_argument("-o", "--output", metavar="FILE",
                         help="Write live JSON results to FILE (updated after every test)")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=LOG_LEVEL_CHOICES,
+                        help="Stdout log verbosity (default: INFO). DEBUG "
+                             "additionally prints e.g. the raw samples that "
+                             "feed each box plot. The on-disk log file always "
+                             "captures DEBUG regardless.")
     sub = parser.add_subparsers(dest="mode")
 
     p_loc = sub.add_parser("locations", help="Full location benchmark (baseline + VPN exits)")
@@ -207,6 +221,7 @@ modes:
     if args.mode is None:
         parser.print_help()
         sys.exit(0)
+    _STDOUT_HANDLER.setLevel(getattr(logging, args.log_level))
     log.info("Gnosis VPN Speed Tester — mode: %s — log: %s", args.mode, LOG_FILE)
     args.func(args)
     log.info("Done.")

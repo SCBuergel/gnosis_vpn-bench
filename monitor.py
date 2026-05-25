@@ -1324,11 +1324,38 @@ def cmd_plot(args):
     # Segment & summarize each box file's samples into bursts. With
     # default ping-load output (~3 samples per burst, 30 min apart),
     # 60 s gap + min-samples 1 catches every burst cleanly.
+    #
+    # At log-level DEBUG we dump every raw sample that fed each burst
+    # so the user can eyeball-verify the box against the data — the
+    # whole reason `--log-level DEBUG` exists.
     box_series = []
-    for (kind, points) in box_recs:
+    for path, (kind, points) in zip(box_paths, box_recs):
         bursts_raw = segment_bursts(points, args.box_gap, args.box_min_samples)
         bursts = [summarize_burst(b) for b in bursts_raw]
         box_series.append(Series(kind, points, mode="boxes", bursts=bursts))
+        log.debug(
+            "boxes: %s — %d bursts from %d samples "
+            "(gap=%gs, min_samples=%d)",
+            path, len(bursts), len(points),
+            args.box_gap, args.box_min_samples,
+        )
+        fmt = KIND_FORMATTER.get(kind, lambda v: f"{v:g}")
+        for i, raw in enumerate(bursts_raw):
+            s = bursts[i]
+            log.debug(
+                "  burst %d  N=%d  start=%s  min=%s  max=%s  median=%s  "
+                "mean=%s  σ=%s",
+                i, s["n"],
+                datetime.fromtimestamp(s["t_start"]).strftime("%H:%M:%S"),
+                fmt(s["min"]), fmt(s["max"]), fmt(s["median"]),
+                fmt(s["mean"]), fmt(s["stdev"]),
+            )
+            for t, v in raw:
+                log.debug(
+                    "    [%s] %s",
+                    datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3],
+                    fmt(v),
+                )
 
     left_series = [Series(k, pts, mode="dots") for k, pts in left_dot_recs]
     right_series = [Series(k, pts, mode="dots") for k, pts in right_dot_recs]
