@@ -101,15 +101,26 @@ DEFAULT_BOX_OUTLIER_SIGMA = 3.0
 TIMESTAMP_RE = re.compile(r"\[(\d+(?:\.\d+)?)[^\]]*\]")
 PING_TIME_RE = re.compile(r"time=([\d.]+)\s*ms")
 CURL_SPEED_RE = re.compile(r"^(\d+(?:\.\d+)?)([kMG]?)$")
-SPEED_UNIT_BYTES = {"": 1, "k": 1024, "M": 1024 ** 2, "G": 1024 ** 3}
+# curl prints binary-scaled bytes ("10M" = 10 × 2²⁰ B/s). We convert
+# straight to bits/second here so every downstream computation —
+# axis-range derivation, log-decade tick placement, summary stats —
+# operates in the same unit the chart displays. (Storing bytes and
+# multiplying by 8 only at format time worked, but it made log-y
+# decades land at 8/80/800… instead of the expected 10/100/1000.)
+SPEED_UNIT_BITS = {
+    "":  8,
+    "k": 8 * 1024,
+    "M": 8 * 1024 ** 2,
+    "G": 8 * 1024 ** 3,
+}
 
 
 def parse_speed(token):
-    """Return a curl speed token in bytes/second, or None if unparseable."""
+    """Return a curl speed token in bits/second, or None if unparseable."""
     m = CURL_SPEED_RE.match(token)
     if not m:
         return None
-    return float(m.group(1)) * SPEED_UNIT_BYTES[m.group(2)]
+    return float(m.group(1)) * SPEED_UNIT_BITS[m.group(2)]
 
 
 def parse_recording(path):
@@ -283,22 +294,20 @@ def format_ms(v):
 
 
 def format_bits_per_second(v):
-    """Format a speed sample (internally bytes/sec) as a bit-rate string.
+    """Format a bits/sec sample for the y-axis label.
 
-    curl reports speed in bytes/sec and we store it that way internally
-    (so ``parse_speed`` stays curl-faithful), but bandwidth is
-    conventionally read in bits, so display always multiplies by 8.
-    Suffixes are decimal SI (k = 1e3, M = 1e6, G = 1e9) — what a
-    networking reader expects from "Mbit/s", not the binary 2¹⁰ /
-    2²⁰ / 2³⁰ that "MB" sometimes implies.
+    Samples reach this function already in bits/sec (``parse_speed``
+    does the byte→bit conversion at parse time, so axis-range / log-
+    decade math operates in bits). Suffixes are decimal SI (k = 10³,
+    M = 10⁶, G = 10⁹) — the convention a networking reader expects
+    from "Mbit/s", not the binary 2¹⁰ / 2²⁰ / 2³⁰ that "MB" implies.
     """
     if v <= 0:
         return "0"
-    bits = v * 8
     for unit, suffix in ((1e9, "G"), (1e6, "M"), (1e3, "k")):
-        if bits >= unit:
-            return f"{bits / unit:.3g}{suffix}"
-    return f"{bits:.0f}"
+        if v >= unit:
+            return f"{v / unit:.3g}{suffix}"
+    return f"{v:.0f}"
 
 
 KIND_LABEL = {"ping": "RTT (ms)", "curl": "Speed (bits/s)"}
@@ -1405,11 +1414,12 @@ def cmd_plot(args):
     #
     # Drop non-positive samples (v <= 0) from each burst before
     # summarizing: curl's progress meter always emits a leading "0
-    # bytes/sec" sample at the start of every burst, which would
-    # otherwise pin every whisker's minimum to 0 — wrong on linear
-    # axes (the burst's actual minimum throughput is well above 0
-    # once data flows) and invisible on log-y anyway. Filtering after
-    # segmentation preserves gap-based burst boundaries.
+    # B/s" sample at the start of every burst (which `parse_speed`
+    # forwards as 0 bits/sec), which would otherwise pin every
+    # whisker's minimum to 0 — wrong on linear axes (the burst's
+    # actual minimum throughput is well above 0 once data flows) and
+    # invisible on log-y anyway. Filtering after segmentation
+    # preserves gap-based burst boundaries.
     #
     # At log-level DEBUG we dump every (kept) raw sample that fed each
     # burst so the user can eyeball-verify the box against the data —
