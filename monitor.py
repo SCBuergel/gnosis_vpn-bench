@@ -206,24 +206,61 @@ def summarize_burst(samples):
     """Reduce a burst (list of ``(t, v)``) to box-plot summary stats.
 
     Returns the standard five-number summary (min, Q1, median, Q3, max)
-    plus N and the original sample list (for ``--box-show-dots``).
+    plus N and the surviving inlier list (used by ``--box-show-dots``).
     Q1/Q3 use linear-interpolation quantiles (R type 7) so the IQR
     always sits inside ``[min, max]``. For N=1 every quantile collapses
     to the single value.
+
+    Outlier handling: any sample whose value differs from the median by
+    more than 2σ (population σ of the *original* samples) is treated as
+    an outlier — single pass, NOT iterative. Inliers feed every reported
+    stat (min, Q1, median, Q3, max); outliers are returned separately so
+    the renderer can plot them as standalone ``*`` markers alongside
+    the box.
     """
-    vs_sorted = sorted(v for _, v in samples)
-    n = len(vs_sorted)
-    ts = [t for t, _ in samples]
+    n_all = len(samples)
+    vs_all_sorted = sorted(v for _, v in samples)
+    ts_all_sorted = sorted(t for t, _ in samples)
+
+    # Initial median + σ on the full sample set. We don't recompute σ
+    # after dropping outliers — the user specifically asked for a
+    # single-pass filter (so a borderline second outlier doesn't get
+    # promoted by the shrinking-σ feedback loop).
+    median_initial = _quantile(vs_all_sorted, 0.5)
+    mean_initial = sum(vs_all_sorted) / n_all
+    sigma_initial = math.sqrt(
+        sum((v - mean_initial) ** 2 for v in vs_all_sorted) / n_all
+    )
+    threshold = 2 * sigma_initial
+
+    inliers = [(t, v) for (t, v) in samples
+               if abs(v - median_initial) <= threshold]
+    outliers = [(t, v) for (t, v) in samples
+                if abs(v - median_initial) > threshold]
+    # By construction at least one sample (the one closest to the
+    # median) survives the threshold check, so inliers is never empty —
+    # even for the σ=0 edge case (all values identical, threshold=0,
+    # all samples within 0 of the median).
+
+    inlier_vs_sorted = sorted(v for _, v in inliers)
     return {
-        "n": n,
-        "samples": samples,
-        "t_start": ts[0],
-        "t_center": ts[len(ts) // 2] if n % 2 else (ts[n // 2 - 1] + ts[n // 2]) / 2,
-        "min": vs_sorted[0],
-        "max": vs_sorted[-1],
-        "q1": _quantile(vs_sorted, 0.25),
-        "median": _quantile(vs_sorted, 0.5),
-        "q3": _quantile(vs_sorted, 0.75),
+        "n": len(inliers),
+        "samples": inliers,
+        "outliers": outliers,
+        # Chronological extents come from all samples, not just inliers
+        # — the burst started/centered where it did regardless of which
+        # samples ended up being flagged.
+        "t_start": ts_all_sorted[0],
+        "t_center": (
+            ts_all_sorted[n_all // 2]
+            if n_all % 2
+            else (ts_all_sorted[n_all // 2 - 1] + ts_all_sorted[n_all // 2]) / 2
+        ),
+        "min": inlier_vs_sorted[0],
+        "max": inlier_vs_sorted[-1],
+        "q1": _quantile(inlier_vs_sorted, 0.25),
+        "median": _quantile(inlier_vs_sorted, 0.5),
+        "q3": _quantile(inlier_vs_sorted, 0.75),
     }
 
 
@@ -978,6 +1015,19 @@ class Plot:
                         f'r="2" fill="{color}" fill-opacity="0.5"/>'
                     )
 
+            # Outliers (|v - median| > 2σ on the original samples) get
+            # their own ``*`` marker in the same colour as the box.
+            # Always drawn — there's no "hide" flag because outliers
+            # vanishing without a trace is exactly what box plots are
+            # supposed to prevent.
+            for t, v in b["outliers"]:
+                if not axis.is_visible(v):
+                    continue
+                out.append(
+                    f'<use href="#m-star" x="{self.x_pixel(t):.1f}" '
+                    f'y="{self.y_pixel(v, axis):.1f}" color="{color}"/>'
+                )
+
             if show_labels:
                 start = datetime.fromtimestamp(b["t_start"]).strftime("%H:%M:%S")
                 lines = [
@@ -1065,15 +1115,17 @@ def render(left_series, right_series, log_y=False,
 
     out = plot.header()
 
-    # Only collect markers that will actually be drawn (dot series only —
-    # box series synthesize their own SVG and don't use the marker defs).
-    markers_used = sorted({
-        m
-        for s, (_, m, _) in zip(all_series, parsed)
-        if s.mode == "dots" and m is not None
-    })
+    # Collect markers actually drawn: dot-series markers plus the
+    # ``*`` glyph if any box series carries outliers (the box renderer
+    # uses <use href="#m-star"> for those).
+    markers_used = set()
+    for s, (_, m, _) in zip(all_series, parsed):
+        if s.mode == "dots" and m is not None:
+            markers_used.add(m)
+        elif s.mode == "boxes" and any(b["outliers"] for b in s.bursts):
+            markers_used.add("*")
     if markers_used:
-        out.append("<defs>" + "".join(MARKER_DEFS[m] for m in markers_used) + "</defs>")
+        out.append("<defs>" + "".join(MARKER_DEFS[m] for m in sorted(markers_used)) + "</defs>")
 
     double_y = n_left > 0 and n_right > 0
 
@@ -1377,15 +1429,21 @@ def cmd_plot(args):
             s = bursts[i]
             log.debug(
                 "  burst %d  N=%d  start=%s  min=%s  q1=%s  median=%s  "
-                "q3=%s  max=%s",
+                "q3=%s  max=%s  outliers=%d",
                 i, s["n"],
                 datetime.fromtimestamp(s["t_start"]).strftime("%H:%M:%S"),
                 fmt(s["min"]), fmt(s["q1"]), fmt(s["median"]),
-                fmt(s["q3"]), fmt(s["max"]),
+                fmt(s["q3"]), fmt(s["max"]), len(s["outliers"]),
             )
-            for t, v in kept:
+            for t, v in s["samples"]:
                 log.debug(
                     "    [%s] %s",
+                    datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3],
+                    fmt(v),
+                )
+            for t, v in s["outliers"]:
+                log.debug(
+                    "    [%s] %s  (outlier, >2σ from median)",
                     datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3],
                     fmt(v),
                 )

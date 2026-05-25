@@ -257,9 +257,20 @@ Box anatomy per burst (standard Tukey five-number summary):
 
 | element | encodes |
 |---------|---------|
-| whisker (vertical line with caps) | `min` / `max` |
+| whisker (vertical line with caps) | `min` / `max` (of inliers) |
 | translucent body rectangle | `Q1` → `Q3` (interquartile range, R type 7 linear interpolation) |
 | solid horizontal tick | `median` (`Q2`) |
+| `*` marker | individual outlier sample |
+
+**Outliers.** Before any of the five-number stats are computed, the
+burst's samples are passed through a single-pass outlier filter: any
+sample whose value differs from the median by more than 2σ (population
+σ on the *original* samples) is classified as an outlier. The filter
+runs **once** — σ is not recomputed after removal, so a borderline
+second outlier doesn't get promoted by a shrinking-σ feedback loop.
+Inliers feed every reported stat (`min`, `Q1`, `median`, `Q3`, `max`);
+outliers are still drawn, as standalone `*` markers in the box's
+colour, so they remain visible without distorting the summary.
 
 Bursts are auto-detected from the time gap between successive samples
 in the recording — `--box-gap SECONDS` is the threshold. At default
