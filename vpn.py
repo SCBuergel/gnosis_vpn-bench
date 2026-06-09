@@ -47,7 +47,7 @@ def run_cmd(
 # ---------------------------------------------------------------------------
 
 def get_raw_status() -> dict | None:
-    rc, stdout, stderr = run_cmd(["gnosis_vpn-ctl", "--json", "status"], timeout_s=15)
+    rc, stdout, stderr = run_cmd(["gnosis_vpn-ctl", "--output", "json", "status"], timeout_s=15)
     if rc != 0:
         log.error("status failed (rc=%d): %s", rc, stderr.strip()[:200])
         return None
@@ -65,14 +65,12 @@ def get_destinations() -> list[dict]:
     destinations = []
     for entry in status.get("Status", {}).get("destinations", []):
         dest = entry["destination"]
-        addr_bytes: list[int] = dest["address"]
-        addr_hex = "0x" + "".join(f"{b:02x}" for b in addr_bytes)
         destinations.append({
-            "id": dest["id"],
-            "location": dest.get("meta", {}).get("location", "Unknown"),
-            "address": addr_hex,
+           "id": dest["id"],
+           "location": dest.get("meta", {}).get("location", "Unknown"),
+           "address": dest["address"],
         })
-    return destinations
+        return destinations
 
 
 def _parse_state(raw) -> str:
