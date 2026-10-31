@@ -333,7 +333,7 @@ def _teardown(user: Any, run: Run, profile: Any) -> bool:
             steps.step_destroy(user, run, profile)
             print("All droplets of this run are deleted (verified with the API).")
         return True
-    except Exception as error:  # report loudly; the deletion timer is still armed
+    except (Exception, KeyboardInterrupt) as error:  # report loudly; the deletion timer is still armed
         timer = run.state / "deadline-timer.json"
         print(f"TEARDOWN FAILED: {type(error).__name__}: {error}")
         if timer.exists():
@@ -369,6 +369,8 @@ def cmd_execute(args: argparse.Namespace) -> int:
             plan = steps.step_fund_plan(user, run, profile)
             for node in plan["nodes"]:
                 print(f"  funding {node['name']}: {node['wxhopr']} wxHOPR + {node['xdai']} xDAI")
+            if not confirm("Send these funds?", args.yes):
+                raise RuntimeError("funding declined")
             steps.step_fund_send(user, run, profile)
         for target in targets:
             print(f"== {target.label} ({target.name})")
@@ -410,9 +412,9 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("run", help="run id or directory")
     p.set_defaults(run_func=cmd_status)
 
-    p = sub.add_parser("report", help="render RUN/result.json as self-contained HTML")
+    p = sub.add_parser("report", help="render each RUN/results/<target>/result.json as self-contained HTML")
     p.add_argument("run", help="run id, run directory, or any directory with a result.json")
-    p.add_argument("-o", "--output", metavar="FILE", help="default: RUN/report.html")
+    p.add_argument("-o", "--output", metavar="FILE", help="default: report.html next to result.json")
     p.set_defaults(run_func=cmd_report)
 
     p = sub.add_parser("config", help="show credential and run locations; check file modes")

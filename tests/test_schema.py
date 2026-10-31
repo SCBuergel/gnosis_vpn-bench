@@ -103,3 +103,12 @@ def test_report_without_ladder_says_so():
     result = sample_result()
     result["concurrent"] = None
     assert "no concurrent-load" in render(result)
+
+
+def test_tick_labels_avoid_e_notation():
+    from gvpn_bench.results.render import CSS, tick
+
+    assert tick(1_000_000) == "1,000,000"
+    assert tick(1820.4) == "1,820"
+    assert tick(6.69) == "6.69"
+    assert ':root[data-theme="dark"]' in CSS and ':root:not([data-theme="light"])' in CSS

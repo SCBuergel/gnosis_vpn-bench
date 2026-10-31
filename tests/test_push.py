@@ -87,3 +87,16 @@ def test_refuses_repo_with_staged_changes(tmp_path):
     subprocess.run(["git", "-C", str(repo), "add", "other.txt"], check=True)
     with pytest.raises(RuntimeError, match="staged"):
         push.copy_and_commit(push.prepare(run_dir, repo), "add")
+
+
+def test_vm_ips_found_from_a_target_result_dir(tmp_path):
+    run_dir = tmp_path / "run"
+    (run_dir / "state").mkdir(parents=True)
+    (run_dir / "state" / "inventory.json").write_text(json.dumps([{"name": "c", "ip": "203.0.113.9"}]))
+    target_dir = run_dir / "results" / "austria-jura-prod"
+    target_dir.mkdir(parents=True)
+    assert push.vm_ips_of(target_dir) == {"203.0.113.9"}
+    result = sample_result()
+    result["run"]["notes"] = "via 203.0.113.9"
+    write_result(target_dir, result)
+    assert not push.prepare(target_dir, tmp_path / "repo").scan.clean

@@ -7,12 +7,13 @@ variables.
 Layout::
 
     <runs_dir>/<id>/
-        run.toml         what to test: profile, target, VM sizes, ladder spec
+        run.toml         what to test: profile, targets, VM sizes, ladder spec
         state/   (0700)  private: SSH key, inventory, step journal, tx ledger
-        data/            raw measurements collected from the VMs
-        result.json      versioned result (docs/result-schema.md)
-        report.html      rendered from result.json
-        provenance.json  copy of result.json's provenance block
+        data/<target>/   raw measurements collected from the VMs
+        results/<target>/
+            result.json      versioned result (docs/result-schema.md)
+            report.html      rendered from result.json
+            provenance.json  copy of result.json's provenance block
 
 The runs directory defaults to ``~/.local/state/gvpn-bench/runs``, outside
 the (public) repository. Identity and payment backups go to a separate
@@ -228,14 +229,6 @@ class Run:
     @property
     def data(self) -> Path:
         return self.path / "data"
-
-    @property
-    def result_file(self) -> Path:
-        return self.path / "result.json"
-
-    @property
-    def report_file(self) -> Path:
-        return self.path / "report.html"
 
     def ensure_dirs(self) -> None:
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)

@@ -45,8 +45,10 @@ number of clients, the deletion deadline or the ladder. Defaults: one
 ./gnosis_vpn-bench execute RUN
 ```
 
-`execute` asks once, then runs steps 2–7 below: the same funded clients
-connect to and ladder each target in turn. Teardown (recover, then
+`execute` asks once for the whole run and once more, after reading each
+client's request, before sending funds (`--yes` answers both). It then
+runs steps 2–7 below: the same funded clients connect to and ladder each
+target in turn. Teardown (recover, then
 destroy) always runs at the end, including after an error or Ctrl-C. If
 teardown itself fails, it says so; the deletion timer is still armed, and
 `recover RUN` / `destroy RUN` can be rerun by hand. `--keep` skips
@@ -63,8 +65,11 @@ provenance.json); `report RUN` and `results push RUN` handle every target.
 
 1. The deletion timer is scheduled first (`systemctl --user list-timers`).
    When it fires, it deletes the run's droplets. On a funded, unrecovered
-   run it deletes only if every client's identity backup exists, so funds
-   stay recoverable from the backups.
+   run it deletes only if every funded client's key files (`.id`, `.pass`)
+   are backed up, so funds stay recoverable from the backups. The Safe file
+   is not required for this check: it only exists once a client has
+   deployed its Safe, and the Safe address is also kept in `safe-info.json`
+   after connecting.
 2. The droplets are created, tagged `gvpn-bench-run-<id>`, one at a time;
    the inventory is saved after each.
 3. The origin serves one random file of `transfer_bytes` via nginx.
@@ -78,7 +83,7 @@ provenance.json); `report RUN` and `results push RUN` handle every target.
 ```
 
 The step pins the network's chain metadata. It reads each client's funding
-recommendation and backs up its identity to
+recommendation and backs up its key files to
 `<identity_backup_dir>/<network>/<run>/<client>/`, then shows the amounts
 and asks before sending them from the funding Safe.
 
@@ -94,7 +99,7 @@ the journal does not know, sending stops. Funding never pays a node twice.
 ## 4. Connect
 
 ```bash
-./gnosis_vpn-bench connect RUN
+./gnosis_vpn-bench connect RUN [--target NAME]   # default: the run's first target
 ```
 
 The step starts `ssh-keeper` and `deadman` on each client and a local
@@ -102,7 +107,12 @@ heartbeat process (`state/heartbeat.pid`). It runs a direct (non-VPN)
 download from the origin as a baseline, then connects every client to the
 target **by address**. A client counts as connected only when the egress
 IP changes and the routes to the origin and the ping target go through the
-tunnel. Otherwise its failure gets a status from the fixed list.
+tunnel. Otherwise its failure gets a status from the fixed list. Clients
+first disconnect from any previous target, so a run can test several exits.
+
+`connect` then backs up each client's identity again, now including the
+Safe file; for a connected client a missing Safe file is an error, and a
+changed key file is always refused.
 
 If the operator machine goes away, `deadman` stops the VPN after 6 min and
 reboots the VM once after 12 min.
@@ -110,13 +120,14 @@ reboots the VM once after 12 min.
 ## 5. Measure
 
 ```bash
-./gnosis_vpn-bench ladder RUN       # 1 → 2 → 3 concurrent clients
+./gnosis_vpn-bench ladder RUN [--target NAME]   # 1 → 2 → 3 concurrent clients
 ./gnosis_vpn-bench sweep RUN        # every discovered exit once
 ./gnosis_vpn-bench --run RUN --on client1 ramp   # any local mode on a VM
 ```
 
-`ladder` and `sweep` write `result.json` and `report.html` in the run
-directory. A rung whose clients are not all still connected is `failed`;
+`ladder` and `sweep` write `result.json`, `report.html` and
+`provenance.json` to `RUN/results/<target>/` (a sweep reports under the
+run's first target). A rung whose clients are not all still connected is `failed`;
 the rungs after it are `not_run`.
 
 ## 6. Recover
