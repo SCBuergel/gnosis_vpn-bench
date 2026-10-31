@@ -5,13 +5,13 @@ to ``state/transactions.jsonl`` *before* waiting for its receipt::
 
     {"hash", "sender", "nonce", "purpose", "status", "time"}
 
-``status`` is pending, confirmed, reverted or dropped. Before sending,
-every pending entry is reconciled against its receipt and the chain's
-nonce. An entry without a receipt whose nonce is still unused and that
-the node does not know is ``dropped`` (never broadcast): the next
-transaction reuses its nonce, so at most one of them can execute.
-Anything else without a receipt stops all sending, because retrying an
-ambiguous transaction could pay twice.
+``status`` is pending, confirmed, reverted, dropped or superseded. Before
+sending, every open entry is reconciled against its receipt and the
+chain's nonce. An entry without a receipt whose nonce is still unused and
+that the node does not know is ``dropped`` (probably never broadcast); the
+next send from that sender is *forced* to reuse its nonce, so at most one
+of the two can ever execute. Anything else without a receipt stops all
+sending, because retrying an ambiguous transaction could pay twice.
 
 web3 is imported lazily (``pip install -e '.[remote]'``).
 """
@@ -143,6 +143,16 @@ def safe_call(w3: Any, safe_address: str, owner: Any, target: str, data: bytes =
     return call
 
 
+def _nonce_taken_by_confirmed(entries: list[dict[str, Any]], entry: dict[str, Any]) -> bool:
+    return any(
+        other is not entry
+        and other["status"] == "confirmed"
+        and other["sender"].lower() == entry["sender"].lower()
+        and other["nonce"] == entry["nonce"]
+        for other in entries
+    )
+
+
 def _known_to_node(w3: Any, tx_hash: str) -> bool:
     try:
         return w3.eth.get_transaction(tx_hash) is not None
@@ -173,7 +183,16 @@ class Journal:
         self.path.chmod(0o600)
 
     def reconcile(self, w3: Any) -> None:
-        """Resolve pending entries from receipts; raise if any stays ambiguous."""
+        """Resolve entries from receipts; raise if any stays ambiguous.
+
+        * receipt found → ``confirmed`` / ``reverted``;
+        * nonce consumed by another *confirmed* entry of ours → ``superseded``
+          (it can never execute);
+        * pending, nonce unused, unknown to the node → ``dropped``; the next
+          send from that sender is forced to reuse that nonce (see ``send``);
+        * anything else (nonce consumed by something we did not journal, or
+          still in a mempool) blocks all sending.
+        """
         entries = self.entries()
         unresolved = []
         for entry in entries:
@@ -187,21 +206,17 @@ class Journal:
                 entry["status"] = "confirmed" if receipt["status"] == 1 else "reverted"
                 entry["block"] = receipt["blockNumber"]
                 continue
-            if entry["status"] == "dropped":
+            if _nonce_taken_by_confirmed(entries, entry):
+                entry["status"] = "superseded"
                 continue
             confirmed_nonce = w3.eth.get_transaction_count(entry["sender"], "latest")
-            if confirmed_nonce <= entry["nonce"] and not _known_to_node(w3, entry["hash"]):
-                # Never broadcast (crash between journaling and sending) or
-                # dropped. Its nonce is still free, so the next transaction
-                # from this sender reuses it and makes this one invalid: it
-                # can no longer execute, and retrying cannot pay twice.
-                entry["status"] = "dropped"
-                continue
-            reason = (
-                "nonce used by another transaction"
-                if confirmed_nonce > entry["nonce"]
-                else "still in the mempool"
-            )
+            if confirmed_nonce <= entry["nonce"]:
+                if entry["status"] == "dropped" or not _known_to_node(w3, entry["hash"]):
+                    entry["status"] = "dropped"
+                    continue
+                reason = "still in the mempool"
+            else:
+                reason = "nonce used by a transaction this journal does not confirm"
             unresolved.append(f"{entry['hash']} ({entry.get('purpose')}, nonce {entry['nonce']}: {reason})")
         self._rewrite(entries)
         if unresolved:
@@ -209,6 +224,15 @@ class Journal:
                 "unresolved transactions; check them on a block explorer before retrying: "
                 + "; ".join(unresolved)
             )
+
+    def required_nonce(self, sender: str) -> int | None:
+        """The nonce the next send from *sender* must use, if a dropped entry pins it."""
+        dropped = [
+            e["nonce"]
+            for e in self.entries()
+            if e["status"] == "dropped" and e["sender"].lower() == sender.lower()
+        ]
+        return min(dropped) if dropped else None
 
     def confirmed(self, purpose: str) -> bool:
         return any(e.get("purpose") == purpose and e["status"] == "confirmed" for e in self.entries())
@@ -218,9 +242,19 @@ class Journal:
     ):
         """Sign, journal, broadcast, wait. Raises on revert or ambiguity."""
         self.reconcile(w3)
+        nonce = w3.eth.get_transaction_count(account.address, "pending")
+        pinned = self.required_nonce(account.address)
+        if pinned is not None:
+            # A dropped entry may still sit in some node's mempool. Reusing its
+            # nonce guarantees at most one of the two can ever execute.
+            if w3.eth.get_transaction_count(account.address, "latest") != pinned:
+                raise AmbiguousTransactionError(
+                    f"nonce {pinned} of a dropped transaction is no longer next; check a block explorer"
+                )
+            nonce = pinned
         base = {
             "from": account.address,
-            "nonce": w3.eth.get_transaction_count(account.address, "pending"),
+            "nonce": nonce,
             "chainId": 100,
             "gasPrice": gas_price(w3),
         }

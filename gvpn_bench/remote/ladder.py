@@ -211,7 +211,7 @@ def run_ladder(
         missing = [name for name, item in collected.items() if item is None]
         if missing:
             detail = f"no result from {', '.join(missing)} (agent failed or SSH lost)"
-            rungs.append(empty_rung(rung, names, "failed", "timeout", detail))
+            rungs.append(empty_rung(rung, names, "failed", "error", detail))
             continue
         raw = {name: item for name, item in collected.items() if item is not None}
         last_end = max(item["end"] for item in raw.values())

@@ -90,7 +90,7 @@ def test_missing_client_result_fails_the_rung_and_keeps_earlier_ones(run, monkey
     rungs = ladder.run_ladder(run, run.config.profile(), run.config.target(), hosts, "192.0.2.1", "aa")
     assert [r["status"] for r in rungs] == ["measured", "failed", "not_run"]
     assert rungs[0]["total_mbps"] is not None
-    assert rungs[1]["failure_status"] == "timeout" and "client2" in rungs[1]["detail"]
+    assert rungs[1]["failure_status"] == "error" and "client2" in rungs[1]["detail"]
     assert (run.data / "rung1-client1.json").exists()
 
 
@@ -189,3 +189,55 @@ def test_entry_still_in_mempool_blocks(run):
     w3.eth.get_transaction_count.return_value = 4
     with pytest.raises(Exception, match="mempool"):
         journal.reconcile(w3)
+
+
+def test_send_after_drop_is_forced_onto_the_dropped_nonce(run):
+    journal = Journal(run)
+    journal.append({"hash": "0xaa", "sender": "0x1", "nonce": 5, "purpose": "p", "status": "dropped"})
+    w3 = MagicMock()
+    w3.eth.get_transaction_receipt.side_effect = LookupError
+    w3.eth.get_transaction.side_effect = LookupError
+
+    def count(sender, block):
+        return 6 if block == "pending" else 5  # load-balanced node disagrees
+
+    w3.eth.get_transaction_count.side_effect = count
+    w3.eth.estimate_gas.return_value = 21000
+    w3.eth.gas_price = 1
+    w3.keccak.return_value = bytes(32)
+    account = MagicMock(address="0x1")
+    account.sign_transaction.return_value = MagicMock(raw_transaction=b"raw")
+    w3.eth.wait_for_transaction_receipt.return_value = {"status": 1, "blockNumber": 9}
+    w3.to_checksum_address.side_effect = lambda a: a
+    journal.send(w3, account, "p", to="0x2", value=1)
+    signed_tx = account.sign_transaction.call_args.args[0]
+    assert signed_tx["nonce"] == 5
+
+
+def test_send_refuses_when_dropped_nonce_was_consumed_elsewhere(run):
+    journal = Journal(run)
+    journal.append({"hash": "0xaa", "sender": "0x1", "nonce": 5, "purpose": "p", "status": "dropped"})
+    w3 = MagicMock()
+    w3.eth.get_transaction_receipt.side_effect = LookupError
+    w3.eth.get_transaction_count.return_value = 6
+    with pytest.raises(Exception, match="does not confirm"):
+        journal.send(w3, MagicMock(address="0x1"), "p", to="0x2", value=1)
+    w3.eth.send_raw_transaction.assert_not_called()
+
+
+def test_replacement_is_superseded_when_dropped_entry_mined(run):
+    journal = Journal(run)
+    journal.append({"hash": "0xaa", "sender": "0x1", "nonce": 5, "purpose": "p", "status": "dropped"})
+    journal.append({"hash": "0xbb", "sender": "0x1", "nonce": 5, "purpose": "q", "status": "pending"})
+    w3 = MagicMock()
+    receipts = {"0xaa": {"status": 1, "blockNumber": 9}}
+
+    def receipt(tx_hash):
+        if tx_hash not in receipts:
+            raise LookupError
+        return receipts[tx_hash]
+
+    w3.eth.get_transaction_receipt.side_effect = receipt
+    w3.eth.get_transaction_count.return_value = 6
+    journal.reconcile(w3)
+    assert [e["status"] for e in journal.entries()] == ["confirmed", "superseded"]

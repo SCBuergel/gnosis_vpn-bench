@@ -68,9 +68,11 @@ and asks before sending them from the funding Safe.
 Every transaction is journaled in `state/transactions.jsonl` before it is
 broadcast. If a transaction has no receipt (`AmbiguousTransactionError`),
 nothing more is sent. Look it up on a block explorer, then rerun: a mined
-transaction is reconciled from its receipt, and one that never reached the
-network is marked dropped, because its nonce gets reused and only one of
-the two can execute. Funding never pays a node twice.
+transaction is reconciled from its receipt. One that never reached the
+network is marked dropped, and the next transaction from that sender is
+forced onto the same nonce, so only one of the two can execute (the other
+is then marked superseded). If that nonce was consumed by a transaction
+the journal does not know, sending stops. Funding never pays a node twice.
 
 ## 4. Connect
 
