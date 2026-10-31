@@ -97,11 +97,13 @@ def destination_name(result: dict[str, Any]) -> str:
     return name
 
 
-def vm_ips_of(run_dir: Path) -> set[str]:
-    inventory = run_dir / "state" / "inventory.json"
-    if not inventory.exists():
-        return set()
-    return {m["ip"] for m in json.loads(inventory.read_text()) if m.get("ip")}
+def vm_ips_of(result_dir: Path) -> set[str]:
+    """VM IPs of the run that owns *result_dir* (``RUN`` or ``RUN/results/<target>``)."""
+    for candidate in (result_dir, *result_dir.parents[:2]):
+        inventory = candidate / "state" / "inventory.json"
+        if inventory.exists():
+            return {m["ip"] for m in json.loads(inventory.read_text()) if m.get("ip")}
+    return set()
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
@@ -154,6 +156,7 @@ def check_results_repo(repo: Path) -> str:
 
 @dataclass
 class PushPlan:
+    source: Path
     repo: Path
     destination: Path
     files: list[Path]
@@ -170,7 +173,7 @@ def prepare(run_dir: Path, repo: Path) -> PushPlan:
     files = [run_dir / name for name in ALLOWLIST if (run_dir / name).exists()]
     scan = scan_files(files, vm_ips_of(run_dir))
     destination = repo / "runs" / destination_name(result)
-    return PushPlan(repo=repo, destination=destination, files=files, scan=scan)
+    return PushPlan(source=run_dir, repo=repo, destination=destination, files=files, scan=scan)
 
 
 def copy_and_commit(plan: PushPlan, message: str) -> bool:

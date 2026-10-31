@@ -198,6 +198,10 @@ def prepare_client(run: Run, profile: Profile, host: Host) -> None:
         worker.user,
         worker.home,
     ]
+    for key, value in profile.sysctl:
+        applied = host.run(["sysctl", "-w", f"{key}={value}"], timeout_s=20)
+        if not applied.ok:
+            raise RuntimeError(f"{host.name}: sysctl {key}={value} failed: {applied.stderr.strip()[:200]}")
     result = run_script(host, asset("install-client.sh"), args, timeout_s=900)
     (run.state / f"{host.name}-install.log").write_text(result.stdout + "\n--- stderr ---\n" + result.stderr)
     if not result.ok:

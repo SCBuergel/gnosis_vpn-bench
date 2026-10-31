@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .profiles import CONFIG_ROOT, list_names
+from .profiles import CONFIG_ROOT, list_names, load_target
 from .results.store import write_report
 from .runs import STEPS, Run, check_private_file, load_user_config, open_run, plan_run
 
@@ -69,7 +69,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     run = open_run(args.run, user)
     config = run.config
     print(f"Run {config.id}  ({run.path})")
-    print(f"  profile {config.profile_name}, target {config.target_name}")
+    print(f"  profile {config.profile_name}, targets {', '.join(config.target_names)}")
     steps = run.steps()
     print("Steps:")
     for step in STEPS:
@@ -97,17 +97,35 @@ def cmd_status(args: argparse.Namespace) -> int:
             )
         else:
             print("  NOT recovered yet: funds are held by the client nodes/Safes and open channels")
-    print(f"Result: {_yes_no(run.result_file.exists())}  Report: {_yes_no(run.report_file.exists())}")
+    for name in config.target_names:
+        directory = run.path / "results" / name
+        print(
+            f"Result {name}: {_yes_no((directory / 'result.json').exists())}  "
+            f"report: {_yes_no((directory / 'report.html').exists())}"
+        )
     return 0
 
 
+def result_dirs(ref: str) -> list[Path]:
+    """Directories holding a result.json: the given one, or each target of a run."""
+    direct = Path(ref).expanduser()
+    if (direct / "result.json").exists():
+        return [direct]
+    run = open_run(ref, load_user_config())
+    found = sorted(p.parent for p in (run.path / "results").glob("*/result.json"))
+    if not found:
+        raise FileNotFoundError(f"run {run.config.id} has no results yet")
+    return found
+
+
 def cmd_report(args: argparse.Namespace) -> int:
-    user = load_user_config()
-    run_dir = Path(args.run).expanduser()
-    if not (run_dir / "result.json").exists():
-        run_dir = open_run(args.run, user).path
-    output = write_report(run_dir, Path(args.output) if args.output else None)
-    print(f"Wrote {output}")
+    directories = result_dirs(args.run)
+    if args.output and len(directories) > 1:
+        print("-o needs a single result; this run has one per target")
+        return 2
+    for directory in directories:
+        output = write_report(directory, Path(args.output) if args.output else None)
+        print(f"Wrote {output}")
     return 0
 
 
@@ -132,9 +150,13 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 
 def _open(args: argparse.Namespace) -> tuple[Any, Run, Any, Any]:
+    """User config, run, profile and the selected target (``--target``, default: first)."""
     user = load_user_config()
     run = open_run(args.run, user)
-    return user, run, run.config.profile(), run.config.target()
+    name = getattr(args, "target", None) or run.config.target_name
+    if name not in run.config.target_names:
+        raise SystemExit(f"{name} is not one of this run's targets: {', '.join(run.config.target_names)}")
+    return user, run, run.config.profile(), load_target(name)
 
 
 def cmd_provision(args: argparse.Namespace) -> int:
@@ -192,8 +214,8 @@ def cmd_ladder(args: argparse.Namespace) -> int:
             else f"not measured ({rung['failure_status']})"
         )
         print(f"  rung {rung['rung']}: {value}")
-    steps.step_result(run, profile, target)
-    print(f"Wrote {run.result_file} and {run.report_file}")
+    directory = steps.step_result(run, profile, target)
+    print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
     return 0
 
 
@@ -204,8 +226,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     rows = steps.step_sweep(run, profile, args.exit or None)
     for row in rows:
         print(f"  {row['exit_label']:<16} {row['status']:<22} {row['detail'] or ''}")
-    steps.step_result(run, profile, target)
-    print(f"Wrote {run.result_file} and {run.report_file}")
+    directory = steps.step_result(run, profile, target)
+    print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
     return 0
 
 
@@ -255,9 +277,6 @@ def cmd_results_push(args: argparse.Namespace) -> int:
     from .results import push
 
     user = load_user_config()
-    run_dir = Path(args.run).expanduser()
-    if not (run_dir / "result.json").exists():
-        run_dir = open_run(args.run, user).path
     repo = Path(args.repo).expanduser() if args.repo else user.results_repo
     if repo is None:
         print(
@@ -265,17 +284,20 @@ def cmd_results_push(args: argparse.Namespace) -> int:
             "in ~/.config/gvpn-bench/config.toml"
         )
         return 2
-    plan = push.prepare(run_dir, repo)
-    print(f"Run       : {run_dir}")
+    plans = [push.prepare(directory, repo) for directory in result_dirs(args.run)]
     print(f"Repo      : {repo}")
-    print(f"Target dir: {plan.destination.relative_to(repo)}")
-    print(f"Files     : {', '.join(p.name for p in plan.files)}")
-    if not plan.scan.clean:
-        print("REFUSED — the scan found:")
-        for problem in plan.scan.problems:
-            print(f"  {problem}")
+    refused = False
+    for plan in plans:
+        print(f"Result    : {plan.source}")
+        print(f"  → {plan.destination.relative_to(repo)}: {', '.join(p.name for p in plan.files)}")
+        if plan.scan.clean:
+            print("  scan clean (no private keys, tokens or VM/public IPs)")
+        else:
+            refused = True
+            for problem in plan.scan.problems:
+                print(f"  REFUSED: {problem}")
+    if refused:
         return 1
-    print("Scan      : clean (no private keys, tokens or VM/public IPs)")
     if args.dry_run:
         print("Dry run: nothing copied, committed or pushed.")
         return 0
@@ -283,17 +305,101 @@ def cmd_results_push(args: argparse.Namespace) -> int:
     if not confirm(f"Commit these files in {repo} and push to {remote}?", args.yes):
         print("Nothing copied, committed or pushed.")
         return 0
-    if not push.copy_and_commit(plan, f"Add results {plan.destination.name}"):
-        print("Nothing changed; no commit.")
+    changed = [push.copy_and_commit(plan, f"Add results {plan.destination.name}") for plan in plans]
+    if not any(changed):
+        print("Nothing changed; no commit, nothing pushed.")
+        return 0
     push.push(repo)
     print("Pushed.")
     return 0
 
 
+def _teardown(user: Any, run: Run, profile: Any) -> bool:
+    """Recover funds (if any were sent), then delete the droplets. True on success."""
+    from .finance.recover import recovery_complete
+    from .remote import steps
+    from .remote.inventory import clients, load_inventory
+
+    try:
+        if steps.funds_sent(run) and not run.done("recover"):
+            if not recovery_complete(run, profile, [m.name for m in clients(run)]):
+                print("Recovery: stopping clients and starting channel closure…")
+                steps.step_recover_initiate(user, run, profile)
+            print("Recovery: waiting for the closure grace period, then returning funds…")
+            cleanup = steps.step_recover_finalize(user, run, profile)
+            print(f"Recovered {cleanup['recovered_wxHOPR']} wxHOPR and {cleanup['recovered_xDAI']} xDAI.")
+        if load_inventory(run) and not run.done("destroy"):
+            steps.step_destroy(user, run, profile)
+            print("All droplets of this run are deleted (verified with the API).")
+        return True
+    except Exception as error:  # report loudly; the deletion timer is still armed
+        timer = run.state / "deadline-timer.json"
+        print(f"TEARDOWN FAILED: {type(error).__name__}: {error}")
+        if timer.exists():
+            unit = json.loads(timer.read_text())["unit"]
+            print(f"The deletion timer ({unit}) will still delete the droplets.")
+        print(f"Fix the cause, then run: recover {run.config.id} and destroy {run.config.id}")
+        return False
+
+
+def cmd_execute(args: argparse.Namespace) -> int:
+    """provision → fund → (connect → ladder) per target → recover → destroy."""
+    from .remote import provision as prov
+    from .remote import steps
+
+    user, run, profile, _target = _open(args)
+    targets = run.config.targets()
+    if not run.done("provision"):
+        prov.preflight(run, profile)
+        print(prov.describe_plan(run, profile))
+    print(f"Targets: {', '.join(f'{t.label} ({t.exit_address})' for t in targets)}")
+    print("Funding: each client's recommended wxHOPR and xDAI from the funding Safe.")
+    if args.keep:
+        print(f"Teardown: KEPT; the deletion timer still deletes after {run.config.infra.deadline_hours} h.")
+    else:
+        print("Teardown: recover all funds, then delete every droplet (also after errors or Ctrl-C).")
+    if not confirm("Run all of this?", args.yes):
+        return 1
+    failure: BaseException | None = None
+    try:
+        if not run.done("provision"):
+            steps.step_provision(user, run, profile)
+        if not run.done("fund"):
+            plan = steps.step_fund_plan(user, run, profile)
+            for node in plan["nodes"]:
+                print(f"  funding {node['name']}: {node['wxhopr']} wxHOPR + {node['xdai']} xDAI")
+            steps.step_fund_send(user, run, profile)
+        for target in targets:
+            print(f"== {target.label} ({target.name})")
+            for outcome in steps.step_connect(user, run, profile, target):
+                print(f"  {outcome.client}: {outcome.status} {outcome.detail}")
+            for rung in steps.step_ladder(run, profile, target):
+                value = rung["total_mbps"]
+                shown = (
+                    f"{value:.2f} Mbit/s" if value is not None else f"not measured ({rung['failure_status']})"
+                )
+                print(f"  rung {rung['rung']}: {shown}")
+            print(f"  wrote {steps.step_result(run, profile, target)}")
+    except KeyboardInterrupt as error:
+        failure = error
+        print("Interrupted.")
+    except Exception as error:
+        failure = error
+        print(f"FAILED: {type(error).__name__}: {error}")
+    torn_down = True
+    if args.keep:
+        print("Droplets kept as requested. Run `recover` and `destroy` when done.")
+    else:
+        torn_down = _teardown(user, run, profile)
+    return 0 if failure is None and torn_down else 1
+
+
 def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("plan", help="create a run directory with run.toml (no spending)")
     p.add_argument("--profile", required=True, help="profiles/<name>.toml")
-    p.add_argument("--target", required=True, help="targets/<name>.toml")
+    p.add_argument(
+        "--target", required=True, action="append", help="targets/<name>.toml (repeat for several exits)"
+    )
     p.add_argument("--id", help="run id (default: <UTC time>-<target>-<profile>)")
     p.add_argument("--client-config", metavar="FILE", help="client config.toml to install on the VMs")
     p.add_argument("--notes", default="", help="free text stored in run.toml and result.json")
@@ -323,6 +429,19 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--yes", action="store_true", help="push without asking")
     p.set_defaults(run_func=cmd_results_push)
 
+    p = sub.add_parser(
+        "execute",
+        help="provision, fund, connect + ladder for every target, then recover and destroy (default)",
+    )
+    p.add_argument("run", help="run id or directory")
+    p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    p.add_argument(
+        "--keep",
+        action="store_true",
+        help="keep the droplets afterwards (the deletion timer still deletes them at the deadline)",
+    )
+    p.set_defaults(run_func=cmd_execute)
+
     remote_steps = [
         ("provision", cmd_provision, "create and prepare the run's droplets (costs money)"),
         ("fund", cmd_fund, "back up identities, then fund each client from the funding Safe"),
@@ -338,4 +457,6 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
         p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
         if name == "sweep":
             p.add_argument("--exit", action="append", metavar="ADDRESS", help="only this exit (repeatable)")
+        if name in ("connect", "ladder"):
+            p.add_argument("--target", help="which of the run's targets (default: the first)")
         p.set_defaults(run_func=func)

@@ -31,6 +31,7 @@ import re
 import stat
 import tempfile
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -126,7 +127,7 @@ class RunConfig:
     id: str
     created_at: str
     profile_name: str
-    target_name: str
+    target_names: tuple[str, ...]
     infra: InfraSpec
     ladder: LadderSpec
     client_config: Path | None
@@ -135,8 +136,16 @@ class RunConfig:
     def profile(self, root: Path = CONFIG_ROOT) -> Profile:
         return load_profile(self.profile_name, root)
 
+    @property
+    def target_name(self) -> str:
+        """The first (primary) target; sweeps report against it."""
+        return self.target_names[0]
+
     def target(self, root: Path = CONFIG_ROOT) -> Target:
         return load_target(self.target_name, root)
+
+    def targets(self, root: Path = CONFIG_ROOT) -> list[Target]:
+        return [load_target(name, root) for name in self.target_names]
 
 
 def _toml_value(value: Any) -> str:
@@ -155,7 +164,7 @@ def render_run_toml(config: RunConfig) -> str:
         f"id = {_toml_value(config.id)}",
         f"created_at = {_toml_value(config.created_at)}",
         f"profile = {_toml_value(config.profile_name)}",
-        f"target = {_toml_value(config.target_name)}",
+        f"targets = {_toml_value(config.target_names)}",
     ]
     if config.client_config is not None:
         lines.append(f"client_config = {_toml_value(str(config.client_config))}")
@@ -169,6 +178,14 @@ def render_run_toml(config: RunConfig) -> str:
     for key, value in vars(config.ladder).items():
         lines.append(f"{key} = {_toml_value(value)}")
     return "\n".join(lines) + "\n"
+
+
+def _target_names(data: dict[str, Any]) -> tuple[str, ...]:
+    """``targets = [...]``, or a single ``target = "..."``."""
+    names = tuple(str(n) for n in data["targets"]) if "targets" in data else (str(data["target"]),)
+    if not names or len(set(names)) != len(names):
+        raise ValueError("targets must be a non-empty list without duplicates")
+    return names
 
 
 def parse_run_toml(text: str) -> RunConfig:
@@ -188,7 +205,7 @@ def parse_run_toml(text: str) -> RunConfig:
         id=run_id,
         created_at=str(data["created_at"]),
         profile_name=str(data["profile"]),
-        target_name=str(data["target"]),
+        target_names=_target_names(data),
         infra=infra,
         ladder=ladder,
         client_config=Path(client_config).expanduser() if client_config else None,
@@ -285,7 +302,7 @@ def default_run_id(profile: str, target: str, now: datetime | None = None) -> st
 def plan_run(
     user: UserConfig,
     profile_name: str,
-    target_name: str,
+    target_names: str | Sequence[str],
     *,
     run_id: str | None = None,
     client_config: Path | None = None,
@@ -293,13 +310,22 @@ def plan_run(
     root: Path = CONFIG_ROOT,
 ) -> Run:
     """Create a run directory with run.toml. No network calls, no spending."""
+    names = (target_names,) if isinstance(target_names, str) else tuple(target_names)
+    if not names or len(set(names)) != len(names):
+        raise ValueError("give at least one target, without duplicates")
     profile = load_profile(profile_name, root)
-    target = load_target(target_name, root)
-    check_compatible(profile, target)
-    run_id = run_id or default_run_id(profile_name, target_name)
+    targets = [load_target(name, root) for name in names]
+    for target in targets:
+        check_compatible(profile, target)
+    run_id = run_id or default_run_id(
+        profile_name, "+".join(names) if len(names) < 3 else f"{len(names)}exits"
+    )
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError(f"invalid run id {run_id!r}")
-    client_config = client_config or target.client_config
+    configs = {t.client_config for t in targets if t.client_config is not None}
+    if client_config is None and len(configs) > 1:
+        raise ValueError("these targets need different client configs; plan them as separate runs")
+    client_config = client_config or (configs.pop() if configs else None)
     if client_config is not None and not client_config.exists():
         raise FileNotFoundError(client_config)
     path = user.runs_dir / run_id
@@ -309,7 +335,7 @@ def plan_run(
         id=run_id,
         created_at=utc_now(),
         profile_name=profile_name,
-        target_name=target_name,
+        target_names=names,
         infra=InfraSpec(),
         ladder=LadderSpec(),
         client_config=client_config.resolve() if client_config else None,
@@ -319,5 +345,5 @@ def plan_run(
     (path / "run.toml").write_text(render_run_toml(config))
     run = Run(path=path, config=config)
     run.ensure_dirs()
-    run.mark("plan", profile=profile_name, target=target_name)
+    run.mark("plan", profile=profile_name, targets=list(names))
     return run

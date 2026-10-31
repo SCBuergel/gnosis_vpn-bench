@@ -12,6 +12,7 @@ import concurrent.futures
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from ..host import Host
@@ -28,7 +29,7 @@ from ..results.store import (
 from ..runs import Run, UserConfig, utc_now, write_private_json
 from . import deadline, guards
 from .backup import backup_identity, save_safe_info
-from .connect import ConnectOutcome, connect_client, vpn_for
+from .connect import ConnectOutcome, connect_client, disconnect, vpn_for
 from .digitalocean import Api, load_token, run_tag
 from .inventory import Machine, clients, host_for, load_inventory, machine
 from .ladder import run_ladder
@@ -142,6 +143,10 @@ def direct_baseline(run: Run, hosts: list[Host], origin_ip: str) -> list[dict[st
     return rows
 
 
+def result_dir(run: Run, target: Target) -> Path:
+    return run.path / "results" / target.name
+
+
 def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -> list[ConnectOutcome]:
     pairs = client_hosts(run)
     hosts = [h for _, h in pairs]
@@ -151,6 +156,8 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
     guards.start_heartbeat(run)
     if not (run.state / "baseline.json").exists():
         direct_baseline(run, hosts, str(origin.ip))
+    # Leave any previous target first (a run can test several exits).
+    _parallel(lambda host: disconnect(host, profile), hosts)
     route_checks = [str(origin.ip), run.config.ladder.ping_target]
     outcomes = _parallel(
         lambda pair: connect_client(
@@ -164,7 +171,7 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
             if info.get("info"):
                 save_safe_info(user, run, profile, host.name, info["info"])
     write_private_json(
-        run.state / "connect.json",
+        run.state / f"connect-{target.name}.json",
         [
             {
                 "client": o.client,
@@ -179,7 +186,7 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
             for o in outcomes
         ],
     )
-    run.mark("connect", statuses={o.client: o.status for o in outcomes})
+    run.mark("connect", target=target.name, statuses={o.client: o.status for o in outcomes})
     return outcomes
 
 
@@ -189,10 +196,21 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
 def step_ladder(run: Run, profile: Profile, target: Target) -> list[dict[str, Any]]:
     origin = machine(run, "origin")
     origin_sha = json.loads((run.state / "origin.json").read_text())["sha256"]
-    write_private_json(run.state / "ladder-started.json", {"at": utc_now()})
-    rungs = run_ladder(run, profile, target, [h for _, h in client_hosts(run)], str(origin.ip), origin_sha)
-    write_private_json(run.state / "ladder.json", {"rungs": rungs, "finished_at": utc_now()})
-    run.mark("ladder", totals={r["rung"]: r["total_mbps"] for r in rungs})
+    started = utc_now()
+    rungs = run_ladder(
+        run,
+        profile,
+        target,
+        [h for _, h in client_hosts(run)],
+        str(origin.ip),
+        origin_sha,
+        data_dir=run.data / target.name,
+    )
+    write_private_json(
+        run.state / f"ladder-{target.name}.json",
+        {"rungs": rungs, "started_at": started, "finished_at": utc_now()},
+    )
+    run.mark("ladder", target=target.name, totals={r["rung"]: r["total_mbps"] for r in rungs})
     return rungs
 
 
@@ -213,6 +231,16 @@ def step_sweep(run: Run, profile: Profile, only: list[str] | None) -> list[dict[
 
 
 # -- recover and destroy -------------------------------------------------------------
+
+
+def funds_sent(run: Run) -> bool:
+    """True once any funding transaction of this run is confirmed (or still open)."""
+    from ..finance.wallet import Journal
+
+    return any(
+        str(e.get("purpose", "")).startswith("fund:") and e["status"] in ("confirmed", "pending", "dropped")
+        for e in Journal(run).entries()
+    )
 
 
 def step_recover_initiate(user: UserConfig, run: Run, profile: Profile) -> dict[str, Any]:
@@ -249,8 +277,7 @@ def step_recover_finalize(user: UserConfig, run: Run, profile: Profile) -> dict[
 def step_destroy(user: UserConfig, run: Run, profile: Profile) -> dict[str, Any]:
     """Delete only this run's tagged droplets, after re-verifying recovery."""
     inventory = load_inventory(run)
-    funded = (run.state / "funding.json").exists()
-    if funded:
+    if funds_sent(run):
         from ..finance.recover import verify_for_destroy
         from ..finance.wallet import connect_chain
 
@@ -286,10 +313,11 @@ def _read(run: Run, name: str) -> Any:
 def build_result(run: Run, profile: Profile, target: Target) -> dict[str, Any]:
     machines = _read(run, "machines.json") or []
     client_infos = [m for m in machines if m["role"] == "client"]
-    ladder = _read(run, "ladder.json")
-    sweep = _read(run, "sweep.json") or []
-    connect = _read(run, "connect.json") or []
-    started = (_read(run, "ladder-started.json") or {}).get("at")
+    ladder = _read(run, f"ladder-{target.name}.json")
+    # A sweep covers all exits; it is reported with the run's primary target.
+    sweep = (_read(run, "sweep.json") or []) if target.name == run.config.target_name else []
+    connect = _read(run, f"connect-{target.name}.json") or []
+    started = (ladder or {}).get("started_at")
     kind = "ladder" if ladder else "sweep"
     ctl_versions = {m.get("ctl_version") for m in client_infos}
     packages = {m.get("package_version") for m in client_infos}
@@ -394,6 +422,9 @@ def build_result(run: Run, profile: Profile, target: Target) -> dict[str, Any]:
     return result
 
 
-def step_result(run: Run, profile: Profile, target: Target) -> None:
-    write_result(run.path, build_result(run, profile, target))
-    write_report(run.path)
+def step_result(run: Run, profile: Profile, target: Target) -> Path:
+    directory = result_dir(run, target)
+    directory.mkdir(parents=True, exist_ok=True)
+    write_result(directory, build_result(run, profile, target))
+    write_report(directory)
+    return directory

@@ -18,6 +18,7 @@ import logging
 import time
 from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 from typing import Any, TypeVar
 
 from ..host import Host, read_file, write_file
@@ -171,8 +172,11 @@ def run_ladder(
     client_hosts: list[Host],
     origin_ip: str,
     origin_sha256: str,
+    data_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     spec = run.config.ladder
+    data_dir = data_dir or run.data
+    data_dir.mkdir(parents=True, exist_ok=True)
     attempt = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     rungs: list[dict[str, Any]] = []
     raw_by_rung: dict[int, dict[str, dict[str, Any]]] = {}
@@ -231,6 +235,6 @@ def run_ladder(
             pings = fetch_pings(host, attempt, rung)
             if pings is not None:
                 raw[host.name]["pings"] = pings
-            (run.data / f"rung{rung}-{host.name}.json").write_text(json.dumps(raw[host.name]))
+            (data_dir / f"rung{rung}-{host.name}.json").write_text(json.dumps(raw[host.name]))
         rungs[position] = rung_entry(rung, raw, origin_sha256, rungs[position]["gap_before_s"])
     return rungs

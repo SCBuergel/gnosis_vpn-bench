@@ -1,0 +1,9 @@
+label = "Netherlands"
+exit_address = "0x00d7096439d1f731c73574adb7e4a9f3b7775326"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Amsterdam"
+last_verified = 2026-10-29
+notes = """
+Packaged jura-prod default. On 2026-10-29 a v4 client completed a 5 MiB
+tunnelled download and 3 pings (with the 8/16 MiB socket buffers)."""

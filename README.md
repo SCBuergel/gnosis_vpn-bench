@@ -75,11 +75,20 @@ alone. With `--run`, DNS is never touched on the run's VMs, whatever
 ## Remote runs
 
 ```bash
-./gnosis_vpn-bench plan --profile v4-jura-prod --target serbia-jura-prod
+./gnosis_vpn-bench plan --profile v4-jura-prod --target netherlands-jura-prod --target austria-jura-prod
+./gnosis_vpn-bench execute RUN       # everything below in one go, then recover + destroy
+```
+
+`execute` always recovers funds and deletes the droplets at the end, also
+after an error or Ctrl-C. `--keep` leaves them running, but the deletion
+timer set at provisioning (`deadline_hours`, default 4) still deletes them.
+The individual steps:
+
+```bash
 ./gnosis_vpn-bench provision RUN     # asks first; costs money
 ./gnosis_vpn-bench fund RUN          # asks first; moves funds
-./gnosis_vpn-bench connect RUN
-./gnosis_vpn-bench ladder RUN        # and/or: sweep RUN
+./gnosis_vpn-bench connect RUN [--target NAME]
+./gnosis_vpn-bench ladder RUN [--target NAME]   # and/or: sweep RUN
 ./gnosis_vpn-bench recover RUN       # asks first; returns funds
 ./gnosis_vpn-bench destroy RUN       # asks first; deletes this run's VMs
 ./gnosis_vpn-bench status RUN

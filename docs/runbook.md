@@ -38,6 +38,23 @@ number of clients, the deletion deadline or the ladder. Defaults: one
 `c-2` origin plus three `c-4` clients in `fra1`; a 4 h deadline;
 200,000,000-byte transfers, a 300 s deadline, 10 s gaps and rungs 1, 2, 3.
 
+## The usual way: `execute`
+
+```bash
+./gnosis_vpn-bench plan --profile v4-jura-prod --target netherlands-jura-prod --target austria-jura-prod
+./gnosis_vpn-bench execute RUN
+```
+
+`execute` asks once, then runs steps 2–7 below: the same funded clients
+connect to and ladder each target in turn. Teardown (recover, then
+destroy) always runs at the end, including after an error or Ctrl-C. If
+teardown itself fails, it says so; the deletion timer is still armed, and
+`recover RUN` / `destroy RUN` can be rerun by hand. `--keep` skips
+teardown; the timer still deletes the droplets at the deadline.
+
+Results land in `RUN/results/<target>/` (result.json, report.html,
+provenance.json); `report RUN` and `results push RUN` handle every target.
+
 ## 2. Provision
 
 ```bash

@@ -158,7 +158,7 @@ def test_build_result_from_state_is_valid(run):
         [{"role": "client", "name": "client1", "size": "c-4", "vcpus": 4, "ctl_version": "0.101.1"}],
     )
     write_private_json(
-        run.state / "ladder.json",
+        run.state / "ladder-kaunas.json",
         {
             "rungs": [
                 rung_entry(1, {"client1": agent_result(0, 2, 250_000)}, "aa", None),
@@ -168,7 +168,7 @@ def test_build_result_from_state_is_valid(run):
         },
     )
     write_private_json(
-        run.state / "connect.json",
+        run.state / "connect-kaunas.json",
         [
             {
                 "client": "client1",

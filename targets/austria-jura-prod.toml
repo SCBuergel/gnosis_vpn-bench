@@ -1,0 +1,10 @@
+label = "Austria"
+exit_address = "0x210a14012535321b919653fdee8c2d5971b0e534"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Vienna"
+last_verified = 2026-10-29
+notes = """
+Packaged jura-prod default (16-core node, 16 peer limit). On 2026-10-29 a v4
+client completed a 5 MiB tunnelled download and 3 pings (with the 8/16 MiB
+socket buffers)."""

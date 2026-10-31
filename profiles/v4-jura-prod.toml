@@ -10,3 +10,11 @@ sha256 = "1ed6ba106b07056e49f8d6bde9790fd39de04bca9b410184083b9a7ad748e30b"
 
 [worker]
 model = "v4-root"
+
+# Without larger socket buffers the v4 killswitch setup hit netlink ENOBUFS
+# (105) on 2-vCPU+ VMs; the 2026-10-29 default-exit checks passed with these.
+[host.sysctl]
+"net.core.rmem_default" = 8388608
+"net.core.rmem_max" = 16777216
+"net.core.wmem_default" = 8388608
+"net.core.wmem_max" = 16777216

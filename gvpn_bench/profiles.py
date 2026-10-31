@@ -115,6 +115,7 @@ class Profile:
     worker: WorkerModel
     description: str
     client_config_path: str | None = None
+    sysctl: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,6 +172,19 @@ def _package(data: dict[str, Any]) -> PackagePin:
     )
 
 
+_SYSCTL_KEY = re.compile(r"[a-z0-9_]+(\.[a-z0-9_]+)+")
+
+
+def _sysctl(table: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """``[host.sysctl]`` key = value pairs, applied on client VMs at provisioning."""
+    pairs = []
+    for key, value in sorted(table.items()):
+        if not _SYSCTL_KEY.fullmatch(key) or not isinstance(value, (int, str)) or isinstance(value, bool):
+            raise ValueError(f"invalid sysctl setting {key} = {value!r}")
+        pairs.append((key, str(value)))
+    return tuple(pairs)
+
+
 def load_profile(name: str, root: Path = CONFIG_ROOT) -> Profile:
     _check_name("profile", name)
     path = root / "profiles" / f"{name}.toml"
@@ -189,6 +203,7 @@ def load_profile(name: str, root: Path = CONFIG_ROOT) -> Profile:
         worker=_worker(data["worker"]),
         description=str(data.get("description", "")),
         client_config_path=data.get("client_config_path"),
+        sysctl=_sysctl(data.get("host", {}).get("sysctl", {})),
     )
 
 
