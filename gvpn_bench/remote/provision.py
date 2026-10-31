@@ -25,8 +25,10 @@ from typing import Any
 from ..host import Host, SshHost, run_script, write_file
 from ..profiles import Profile
 from ..runs import Run, utc_now, write_private_json
+from ..vpn import CtlError
 from . import deadline
 from .assets import asset, asset_bytes
+from .connect import vpn_for
 from .digitalocean import Api, public_ipv4, run_tag
 from .inventory import Machine, host_for, load_inventory, save_inventory, ssh_key_file
 
@@ -220,6 +222,24 @@ def prepare_client(run: Run, profile: Profile, host: Host) -> None:
         restarted = host.run(["systemctl", "restart", "gnosisvpn"], timeout_s=60)
         if not restarted.ok:
             raise RuntimeError(f"{host.name}: restart after config upload failed")
+        # The restart stops the worker that install-client.sh started; start it again.
+        start_worker(host, profile)
+
+
+def start_worker(host: Host, profile: Profile, attempts: int = 30, pause_s: float = 2.0) -> None:
+    """``start-client`` until the service accepts it (it needs a moment after a restart)."""
+    vpn = vpn_for(host, profile)
+    last = ""
+    for _ in range(attempts):
+        try:
+            response = vpn.ctl("start-client", "30m", timeout_s=45)
+            if response.get("StartClient") in ("Started", "AlreadyRunning"):
+                return
+            last = json.dumps(response)[:200]
+        except CtlError as error:
+            last = str(error)[:200]
+        time.sleep(pause_s)
+    raise RuntimeError(f"{host.name}: worker did not start after the config upload: {last}")
 
 
 def client_config_sha256(run: Run) -> str | None:

@@ -290,3 +290,41 @@ def test_resumed_provision_skips_preflight(run, monkeypatch):
 
 def test_default_deadline_is_90_seconds():
     assert LadderSpec().deadline_s == 90
+
+
+# -- client config upload ------------------------------------------------------------------------
+
+
+def test_config_upload_restarts_then_starts_the_worker_again(tmp_path, monkeypatch):
+    from gvpn_bench.host import CommandResult
+    from gvpn_bench.remote import provision
+
+    run = plan_run(user_config(tmp_path), "v4-jura-prod", "lisbon-jura-prod", run_id="cfg")
+    order = []
+    starts = iter([{"StartClient": "ServiceNotReady"}, {"StartClient": "Started"}])
+
+    def respond(argv, _):
+        if argv[:2] == ["systemctl", "restart"]:
+            order.append("restart")
+        elif "gnosis_vpn-ctl" in argv:
+            order.append("start-client")
+            return ok(next(starts))
+        return ok()
+
+    monkeypatch.setattr(provision, "upload_tools", lambda host: None)
+    monkeypatch.setattr(provision, "run_script", lambda *a, **k: CommandResult(0, "worker started", ""))
+    monkeypatch.setattr(provision, "write_file", lambda *a, **k: order.append("upload"))
+    monkeypatch.setattr(provision.time, "sleep", lambda s: None)
+    provision.prepare_client(run, run.config.profile(), FakeHost(respond, name="client1"))
+    assert order == ["upload", "restart", "start-client", "start-client"]
+
+
+def test_worker_that_never_starts_after_upload_fails_provisioning(monkeypatch):
+    from gvpn_bench.remote import provision
+
+    monkeypatch.setattr(provision.time, "sleep", lambda s: None)
+    profile = MagicMock()
+    profile.worker.ctl_prefix.return_value = []
+    host = FakeHost(lambda a, d: ok({"StartClient": "ServiceNotReady"}), name="client1")
+    with pytest.raises(RuntimeError, match="did not start"):
+        provision.start_worker(host, profile, attempts=3)
