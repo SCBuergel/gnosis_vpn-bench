@@ -299,6 +299,7 @@ def plan_run(
     run_id = run_id or default_run_id(profile_name, target_name)
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError(f"invalid run id {run_id!r}")
+    client_config = client_config or target.client_config
     if client_config is not None and not client_config.exists():
         raise FileNotFoundError(client_config)
     path = user.runs_dir / run_id

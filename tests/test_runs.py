@@ -67,3 +67,10 @@ def test_private_file_check(tmp_path):
     secret.chmod(0o600)
     assert check_private_file(secret) == []
     assert check_private_file(tmp_path / "missing")
+
+
+def test_target_client_config_becomes_the_run_default(tmp_path):
+    run = plan_run(user_config(tmp_path), "v4-jura-prod", "serbia-jura-prod", run_id="r6")
+    assert run.config.client_config is not None
+    assert run.config.client_config.name == "v4-jura-prod-with-serbia.toml"
+    assert run.config.profile().client_config_path == "/etc/gnosisvpn/config.toml"

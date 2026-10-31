@@ -7,3 +7,4 @@ last_verified = 2026-10-29
 notes = """
 Added to the packaged Jura config by hand. On 2026-10-29 no tunnel was
 established on any of three funded v4 clients (control requests timed out)."""
+client_config = "client-configs/v4-jura-prod-with-serbia.toml"

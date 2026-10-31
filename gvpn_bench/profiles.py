@@ -127,6 +127,7 @@ class Target:
     location: str | None
     last_verified: date | None
     notes: str
+    client_config: Path | None = None
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -213,6 +214,7 @@ def load_target(name: str, root: Path = CONFIG_ROOT) -> Target:
         location=data.get("location"),
         last_verified=verified if isinstance(verified, date) else None,
         notes=str(data.get("notes", "")),
+        client_config=root / data["client_config"] if data.get("client_config") else None,
     )
 
 

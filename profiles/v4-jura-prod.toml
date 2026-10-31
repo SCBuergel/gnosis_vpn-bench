@@ -1,5 +1,6 @@
 description = "Stable 0.96.0 package (client 0.97.0) on jura-prod, root-owned worker"
 network = "jura-prod"
+client_config_path = "/etc/gnosisvpn/config.toml"
 
 [package]
 channel = "stable"
