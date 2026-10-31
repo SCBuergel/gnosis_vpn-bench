@@ -90,6 +90,7 @@ class ClientStatus:
     connected_id: str | None
     connecting_id: str | None
     connecting_phase: str | None
+    reconnecting_id: str | None
     disconnecting_ids: list[str]
     funding_request: FundingRequest | None
     route_health: dict[str, Any]
@@ -101,11 +102,13 @@ class ClientStatus:
         return self.run_mode == "Running"
 
     def connection_state(self, destination_id: str) -> str:
-        """``Connected``, ``Connecting``, ``Disconnecting`` or ``None``."""
+        """``Connected``, ``Connecting``, ``Reconnecting``, ``Disconnecting`` or ``None``."""
         if self.connected_id == destination_id:
             return "Connected"
         if self.connecting_id == destination_id:
             return "Connecting"
+        if self.reconnecting_id == destination_id:
+            return "Reconnecting"
         if destination_id in self.disconnecting_ids:
             return "Disconnecting"
         return "None"
@@ -162,6 +165,7 @@ def parse_status(payload: dict[str, Any]) -> ClientStatus:
         connected_id=_destination_id(status.get("connected")),
         connecting_id=_destination_id(connecting),
         connecting_phase=connecting.get("phase") if isinstance(connecting, dict) else None,
+        reconnecting_id=_destination_id(status.get("reconnecting")),
         disconnecting_ids=disconnecting,
         funding_request=_funding_request(run_mode_raw),
         route_health=route_health,
