@@ -251,6 +251,45 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_results_push(args: argparse.Namespace) -> int:
+    from .results import push
+
+    user = load_user_config()
+    run_dir = Path(args.run).expanduser()
+    if not (run_dir / "result.json").exists():
+        run_dir = open_run(args.run, user).path
+    repo = Path(args.repo).expanduser() if args.repo else user.results_repo
+    if repo is None:
+        print(
+            "No results repository: pass --repo PATH or set [results] repo "
+            "in ~/.config/gvpn-bench/config.toml"
+        )
+        return 2
+    plan = push.prepare(run_dir, repo)
+    print(f"Run       : {run_dir}")
+    print(f"Repo      : {repo}")
+    print(f"Target dir: {plan.destination.relative_to(repo)}")
+    print(f"Files     : {', '.join(p.name for p in plan.files)}")
+    if not plan.scan.clean:
+        print("REFUSED — the scan found:")
+        for problem in plan.scan.problems:
+            print(f"  {problem}")
+        return 1
+    print("Scan      : clean (no private keys, tokens or VM/public IPs)")
+    if args.dry_run:
+        print("Dry run: nothing copied, committed or pushed.")
+        return 0
+    remote = push.check_results_repo(repo)
+    if not push.copy_and_commit(plan, f"Add results {plan.destination.name}"):
+        print("Nothing changed; no commit.")
+    if not confirm(f"Push {repo} to {remote}?", args.yes):
+        print("Committed locally, not pushed.")
+        return 0
+    push.push(repo)
+    print("Pushed.")
+    return 0
+
+
 def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("plan", help="create a run directory with run.toml (no spending)")
     p.add_argument("--profile", required=True, help="profiles/<name>.toml")
@@ -271,6 +310,18 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser("config", help="show credential and run locations; check file modes")
     p.set_defaults(run_func=cmd_config)
+
+    p = sub.add_parser("results", help="publish results (see `results push -h`)")
+    results_sub = p.add_subparsers(dest="results_command", required=True)
+    p = results_sub.add_parser(
+        "push",
+        help="copy result.json/report.html/provenance.json to the private results repo, scan, commit, push",
+    )
+    p.add_argument("run", help="run id, run directory, or any directory with a result.json")
+    p.add_argument("--repo", metavar="PATH", help="local checkout of the results repo (default: user config)")
+    p.add_argument("--dry-run", action="store_true", help="show files and scan result only")
+    p.add_argument("--yes", action="store_true", help="push without asking")
+    p.set_defaults(run_func=cmd_results_push)
 
     remote_steps = [
         ("provision", cmd_provision, "create and prepare the run's droplets (costs money)"),
