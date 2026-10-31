@@ -73,6 +73,14 @@ def stage_recording(result_dir: Path) -> Staged:
     return Staged(f"runs/{name}", recording_files(name, result), vm_ips_of(result_dir))
 
 
+def folder_name(name: str) -> str:
+    """A user-given report name as one safe folder name under reports/."""
+    cleaned = _SAFE_NAME.sub("-", name).strip("-.")
+    if not cleaned or cleaned in {".", ".."}:
+        raise ValueError(f"invalid report name {name!r}")
+    return cleaned
+
+
 def report_name(recordings: list[Recording]) -> str:
     first = min(recordings, key=lambda r: r.started)
     when = first.started
@@ -105,7 +113,7 @@ def stage_report(
     title: str | None = None,
     links: dict[str, str] | None = None,
 ) -> Staged:
-    name = _SAFE_NAME.sub("-", name).strip("-") if name else report_name(recordings)
+    name = folder_name(name) if name else report_name(recordings)
     title = title or default_report_title(recordings)
     return Staged(f"reports/{name}", report_files(name, title, recordings, links or {}))
 
@@ -188,7 +196,11 @@ def scan(staged: list[Staged]) -> list[str]:
 
 
 def write(repo: Path, staged: list[Staged]) -> list[str]:
-    """Replace each staged folder's files; return repo-relative paths written."""
+    """Replace each staged folder's files; return the repo-relative paths to commit.
+
+    Whole folders are returned (the root index as its file), so files the
+    regeneration dropped, such as old charts, are committed as deletions.
+    """
     written = []
     for item in staged:
         folder = repo / item.folder
@@ -199,7 +211,10 @@ def write(repo: Path, staged: list[Staged]) -> list[str]:
             target = folder / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text)
-            written.append(f"{item.folder}/{path}" if item.folder else path)
+            if not item.folder:
+                written.append(path)
+        if item.folder:
+            written.append(item.folder)
     return written
 
 

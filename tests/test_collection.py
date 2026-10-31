@@ -91,3 +91,42 @@ def test_nice_scale_steps():
     assert top >= 23.26 * 1.1 and (top / step) == round(top / step)
     assert nice_scale(0) == (1.0, 0.25)
     assert nice_scale(1820)[1] in (500, 1000)
+
+
+def test_partial_failures_in_repetitions_are_shown():
+    reps = [
+        recording("a", totals=(40, 50)),
+        recording("b", totals=(42, None), started="2026-11-02T00:00:00Z"),
+        recording("c", totals=(44, None), started="2026-11-03T00:00:00Z"),
+    ]
+    collection = Collection("t", reps)
+    (series,) = collection.series()
+    point = {p.clients: p for p in series.points()}[2]
+    assert (point.values, point.missing, point.attempts) == ((50,), ("timeout", "timeout"), 3)
+    text, charts = render_markdown(collection)
+    assert "50.00; 2 of 3 not measured: timeout" in text
+    assert ">1/3</text>" in charts["charts/overview.svg"]
+
+
+def test_line_breaks_at_a_rung_nobody_measured():
+    result = recording("a", totals=(40, None))
+    result.result["concurrent"]["rungs"].append(
+        {**result.result["concurrent"]["rungs"][0], "rung": 3, "total_mbps": 60.0}
+    )
+    (series,) = Collection("t", [result]).series()
+    assert series.unmeasured() == [2]
+    svg = overview_chart([series], FILE_THEME)
+    assert not re.search(r'<path d="M[\d.,]+ L[\d.,]+" fill="none"', svg)
+
+
+def test_series_with_the_same_label_are_both_drawn():
+    a = recording("a")
+    b = recording("b", address=AUSTRIA, label="GVPN-LT-1")
+    series = Collection("t", [a, b]).series()
+    assert len(series) == 2
+    assert overview_chart(series, FILE_THEME).count("<circle") == 2
+
+
+def test_markdown_escapes_html_from_data():
+    text, _ = render_markdown(Collection("t", [recording("a")]))
+    assert "<script>" not in text and "&lt;script&gt;" in text

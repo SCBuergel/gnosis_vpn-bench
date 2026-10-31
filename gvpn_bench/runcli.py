@@ -359,7 +359,18 @@ def cmd_results_link(args: argparse.Namespace) -> int:
     repo = _results_repo(args)
     if repo is None:
         return 2
-    meta_file = repo / "reports" / args.report / "report.json"
+    try:
+        name = publish.folder_name(args.report)
+    except ValueError as error:
+        print(error)
+        return 2
+    if name != args.report:
+        print(f"No report {args.report} in {repo}/reports")
+        return 2
+    if not args.url.startswith("https://"):
+        print("The link must start with https://")
+        return 2
+    meta_file = repo / "reports" / name / "report.json"
     if not meta_file.exists():
         print(f"No report {args.report} in {repo}/reports")
         return 2

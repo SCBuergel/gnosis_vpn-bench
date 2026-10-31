@@ -69,7 +69,11 @@ def load_recording(directory: Path, name: str | None = None) -> Recording:
 class Point:
     clients: int
     values: tuple[float, ...]  # one total Mbit/s per measured repetition
-    missing: int  # repetitions where this rung was not measured
+    missing: tuple[str, ...]  # failure statuses of repetitions that did not measure this rung
+
+    @property
+    def attempts(self) -> int:
+        return len(self.values) + len(self.missing)
 
     @property
     def mean(self) -> float:
@@ -91,17 +95,28 @@ class Series:
     recordings: list[Recording] = field(default_factory=list)
 
     def points(self) -> list[Point]:
-        by_clients: dict[int, list[float | None]] = {}
+        """One point per rung with at least one measurement; failures are kept in ``missing``."""
+        values: dict[int, list[float]] = {}
+        failures: dict[int, list[str]] = {}
         for recording in self.recordings:
             for rung in recording.rungs():
-                by_clients.setdefault(int(rung["rung"]), []).append(rung["total_mbps"])
-        points = []
-        for clients in sorted(by_clients):
-            measured = tuple(v for v in by_clients[clients] if v is not None)
-            missing = len(by_clients[clients]) - len(measured)
-            if measured:
-                points.append(Point(clients, measured, missing))
-        return points
+                clients = int(rung["rung"])
+                values.setdefault(clients, [])
+                failures.setdefault(clients, [])
+                if rung["total_mbps"] is None:
+                    failures[clients].append(str(rung["failure_status"]))
+                else:
+                    values[clients].append(rung["total_mbps"])
+        return [
+            Point(clients, tuple(values[clients]), tuple(failures[clients]))
+            for clients in sorted(values)
+            if values[clients]
+        ]
+
+    def unmeasured(self) -> list[int]:
+        """Rungs attempted in this series that no repetition measured."""
+        measured = {p.clients for p in self.points()}
+        return sorted({rung for rung, _ in self.missing_rungs()} - measured)
 
     def missing_rungs(self) -> list[tuple[int, str]]:
         """(rung, failure_status) for every unmeasured rung in the series."""

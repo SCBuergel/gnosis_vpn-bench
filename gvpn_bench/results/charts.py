@@ -24,14 +24,17 @@ SERIES_COLORS = ("#2563eb", "#ea580c", "#059669", "#9333ea", "#ca8a04", "#db2777
 @dataclass(frozen=True)
 class Theme:
     panel: str | None  # background rect fill; None = transparent
+    surface: str  # fill for hollow markers
     text: str
     grid: str
     strong: str
     warn: str
 
 
-HTML_THEME = Theme(panel=None, text="var(--muted)", grid="var(--grid)", strong="var(--fg)", warn="var(--warn)")
-FILE_THEME = Theme(panel="#ffffff", text="#4b5563", grid="#e5e7eb", strong="#111827", warn="#9a3412")
+HTML_THEME = Theme(
+    panel=None, surface="var(--card)", text="var(--muted)", grid="var(--grid)", strong="var(--fg)", warn="var(--warn)"
+)
+FILE_THEME = Theme(panel="#ffffff", surface="#ffffff", text="#4b5563", grid="#e5e7eb", strong="#111827", warn="#9a3412")
 
 
 def tick(value: float) -> str:
@@ -78,8 +81,8 @@ def overview_chart(series: list[Series], theme: Theme, width: int = 900, height:
     Repetitions show as the mean with a min–max error bar.
     """
     left, right, top, bottom = 70, 24, 44, 52
-    points = {s.label: s.points() for s in series}
-    all_points = [p for pts in points.values() for p in pts]
+    points = [s.points() for s in series]
+    all_points = [p for pts in points for p in pts]
     xs = sorted({p.clients for p in all_points}) or [1]
     xmin, xmax = min(xs), max(xs)
     ymax, ystep = nice_scale(max((p.high for p in all_points), default=0.0))
@@ -116,11 +119,20 @@ def overview_chart(series: list[Series], theme: Theme, width: int = 900, height:
             "No rung was measured: missing data, not 0 Mbit/s</text>"
         )
     for index, s in enumerate(series):
-        pts = points[s.label]
+        pts = points[index]
         stroke = color(index)
-        if len(pts) > 1:
-            path = " ".join(f"{'M' if i == 0 else 'L'}{px(p.clients):.1f},{py(p.mean):.1f}" for i, p in enumerate(pts))
-            parts.append(f'<path d="{path}" fill="none" stroke="{stroke}" stroke-width="2.5"/>')
+        gaps = set(s.unmeasured())
+        segments: list[list[str]] = [[]]
+        previous: int | None = None
+        for p in pts:
+            # A rung attempted but never measured between two points breaks the line.
+            if previous is not None and any(previous < gap < p.clients for gap in gaps):
+                segments.append([])
+            segments[-1].append(f"{'L' if segments[-1] else 'M'}{px(p.clients):.1f},{py(p.mean):.1f}")
+            previous = p.clients
+        for segment in segments:
+            if len(segment) > 1:
+                parts.append(f'<path d="{" ".join(segment)}" fill="none" stroke="{stroke}" stroke-width="2.5"/>')
         for p in pts:
             x = px(p.clients)
             if len(p.values) > 1:
@@ -129,7 +141,18 @@ def overview_chart(series: list[Series], theme: Theme, width: int = 900, height:
                     f'M{x - 6:.1f},{py(p.low):.1f} H{x + 6:.1f} M{x - 6:.1f},{py(p.high):.1f} H{x + 6:.1f}" '
                     f'stroke="{stroke}" stroke-width="1.5"/>'
                 )
-            parts.append(f'<circle cx="{x:.1f}" cy="{py(p.mean):.1f}" r="4.5" fill="{stroke}"/>')
+            if p.missing:
+                # Hollow marker plus "measured/attempted": some repetitions failed here.
+                parts.append(
+                    f'<circle cx="{x:.1f}" cy="{py(p.mean):.1f}" r="5" fill="{theme.surface}" '
+                    f'stroke="{stroke}" stroke-width="2"/>'
+                )
+                parts.append(
+                    f'<text x="{x + 9:.1f}" y="{py(p.mean) + 4:.1f}" fill="{theme.warn}">'
+                    f"{len(p.values)}/{p.attempts}</text>"
+                )
+            else:
+                parts.append(f'<circle cx="{x:.1f}" cy="{py(p.mean):.1f}" r="4.5" fill="{stroke}"/>')
             if len(series) == 1:
                 parts.append(
                     f'<text x="{x:.1f}" y="{py(p.mean) - 12:.1f}" text-anchor="middle" '

@@ -8,6 +8,8 @@ So every report folder gets ``README.md`` and ``charts/*.svg`` next to
 
 from __future__ import annotations
 
+from html import escape
+
 from .charts import FILE_THEME
 from .collection import Collection
 from .report_model import Block, Chart, Heading, Paragraph, Table, build, fmt, subtitle
@@ -15,8 +17,13 @@ from .report_model import Block, Chart, Heading, Paragraph, Table, build, fmt, s
 CHART_DIR = "charts"
 
 
+def _text(text: str) -> str:
+    """Escape HTML; GitHub would sanitise it, but data never becomes markup."""
+    return escape(text, quote=False)
+
+
 def _cell(value: object) -> str:
-    return fmt(value).replace("|", "\\|").replace("\n", " ")
+    return _text(fmt(value)).replace("|", "\\|").replace("\n", " ")
 
 
 def _table(block: Table) -> str:
@@ -45,7 +52,8 @@ def _block(block: Block, charts: dict[str, str]) -> str:
         anchor = f'<a id="{block.anchor}"></a>\n' if block.anchor else ""
         return f"{anchor}{'#' * block.level} {block.text}"
     if isinstance(block, Paragraph):
-        return f"_{block.text}_" if block.muted else f"**{block.text}**" if block.warn else block.text
+        text = _text(block.text)
+        return f"_{text}_" if block.muted else f"**{text}**" if block.warn else text
     if isinstance(block, Table):
         return _table(block)
     if isinstance(block, Chart):

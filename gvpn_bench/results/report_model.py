@@ -83,7 +83,8 @@ def _concurrent(collection: Collection) -> list[Block]:
             f"Each client downloads {spec['transfer_bytes']:,} bytes from a dedicated origin; all clients of "
             f"a rung start at the same instant with a {spec['deadline_s']:g} s deadline. Rates count only the "
             "common overlap (latest start to earliest end). Points are the total over all clients; with "
-            "repeated recordings the point is the mean and the bar spans min to max.",
+            "repeated recordings the point is the mean and the bar spans min to max. A hollow point "
+            "marked m/n means only m of n attempts measured that rung.",
             muted=True,
         )
     )
@@ -101,10 +102,15 @@ def _concurrent(collection: Collection) -> list[Block]:
             point = by_clients.get(clients)
             if point is None:
                 row.append(f"not measured ({missing.get(clients, 'not_run')})")
-            elif len(point.values) == 1:
-                row.append(f"{point.mean:.2f}")
+                continue
+            if len(point.values) == 1:
+                cell = f"{point.mean:.2f}"
             else:
-                row.append(f"{point.mean:.2f} ({point.low:.2f}–{point.high:.2f}, n={len(point.values)})")
+                cell = f"{point.mean:.2f} ({point.low:.2f}–{point.high:.2f}, n={len(point.values)})"
+            if point.missing:
+                statuses = ", ".join(sorted(set(point.missing)))
+                cell += f"; {len(point.missing)} of {point.attempts} not measured: {statuses}"
+            row.append(cell)
         rows.append(row)
     blocks.append(Table(["Series", "Recordings", *[f"{c} client{'s' if c != 1 else ''}" for c in rungs]], rows))
     return blocks

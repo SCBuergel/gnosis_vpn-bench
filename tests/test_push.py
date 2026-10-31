@@ -169,3 +169,35 @@ def test_cli_push_two_locations_then_combine_and_link(tmp_path, monkeypatch, cap
     assert runcli.cmd_results_combine(ns(recordings=["missing"], name=None)) == 2
     assert runcli.cmd_results_rebuild(ns()) == 0
     capsys.readouterr()
+
+
+def test_commit_records_charts_dropped_by_a_rebuild(tmp_path):
+    repo = git_repo(tmp_path / "results")
+    first = publish.Staged("reports/r", {"README.md": "x", "charts/a.svg": "<svg/>", "charts/b.svg": "<svg/>"})
+    assert push.commit(repo, publish.write(repo, [first]), "one")
+    second = publish.Staged("reports/r", {"README.md": "y", "charts/a.svg": "<svg/>"})
+    assert push.commit(repo, publish.write(repo, [second]), "two")
+    tracked = subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True).stdout.split()
+    assert "reports/r/charts/b.svg" not in tracked
+    status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True)
+    assert status.stdout == ""
+
+
+@pytest.mark.parametrize("name", ["..", ".", "///", "", "-"])
+def test_report_names_cannot_escape_reports(name):
+    with pytest.raises(ValueError):
+        publish.folder_name(name)
+    assert publish.folder_name("a/../b") == "a-..-b"
+
+
+def test_link_validates_name_and_url(tmp_path, capsys):
+    import argparse
+
+    from gvpn_bench import runcli
+
+    def ns(report, url):
+        return argparse.Namespace(repo=str(tmp_path), report=report, label="x", url=url, dry_run=True, yes=False)
+
+    assert runcli.cmd_results_link(ns("..", "https://a")) == 2
+    assert runcli.cmd_results_link(ns("r", "http://a")) == 2
+    capsys.readouterr()

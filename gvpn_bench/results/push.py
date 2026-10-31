@@ -159,10 +159,13 @@ def check_results_repo(repo: Path) -> str:
 
 
 def commit(repo: Path, paths: list[str], message: str) -> bool:
-    """Stage exactly *paths* and commit. Returns False if nothing changed."""
+    """Stage *paths* (files or folders, including deletions inside them) and commit.
+
+    Returns False if nothing changed.
+    """
     if git(repo, "diff", "--cached", "--name-only"):
         raise RuntimeError(f"{repo} already has staged changes; commit or unstage them first")
-    git(repo, "add", "--", *paths)
+    git(repo, "add", "-A", "--", *paths)
     if not git(repo, "diff", "--cached", "--name-only"):
         return False
     git(repo, "commit", "-m", message)
