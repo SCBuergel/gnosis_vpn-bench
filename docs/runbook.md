@@ -46,7 +46,8 @@ number of clients, the deletion deadline or the ladder. Defaults: one
 ```
 
 `execute` asks once for the whole run and once more, after reading each
-client's request, before sending funds (`--yes` answers both). It then
+client's request, before sending funds (`--yes` answers both). Declining the funding prompt
+ends the run and tears it down, deleting the droplets just provisioned. It then
 runs steps 2–7 below: the same funded clients connect to and ladder each
 target in turn. Teardown (recover, then
 destroy) always runs at the end, including after an error or Ctrl-C. If

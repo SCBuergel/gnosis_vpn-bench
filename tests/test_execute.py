@@ -241,3 +241,16 @@ def test_connect_disconnects_before_connecting(tmp_path, monkeypatch):
     )
     steps.step_connect(None, run, run.config.profile(), run.config.target())
     assert order == ["disconnect", "connect"]
+
+
+def test_declining_the_funding_prompt_sends_nothing_and_tears_down(faked):
+    run, calls, monkeypatch = faked
+    answers = iter([True, False])  # yes to the run, no to the amounts
+    monkeypatch.setattr(runcli, "confirm", lambda prompt, assume_yes: next(answers))
+    monkeypatch.setattr(steps, "step_provision", lambda *a: run.mark("provision"))
+    monkeypatch.setattr(
+        steps, "step_fund_plan", lambda *a: {"nodes": [{"name": "c1", "wxhopr": "1", "xdai": "0"}]}
+    )
+    monkeypatch.setattr(steps, "step_fund_send", lambda *a: pytest.fail("funds sent without consent"))
+    assert runcli.cmd_execute(argparse.Namespace(run=str(run.path), yes=False, keep=False, target=None)) == 1
+    assert calls == ["teardown"]
