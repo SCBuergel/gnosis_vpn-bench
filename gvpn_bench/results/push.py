@@ -1,7 +1,7 @@
 """Publish a run's results to the separate, private results repository.
 
 ``results push RUN`` copies an allowlist of files into a local checkout of
-the results repo at ``runs/<date>-<target>-<profile>/``, scans them,
+the results repo at ``runs/<YYYY-MM-DD>-<HHMMSS>Z-<target>-<profile>/``, scans them,
 commits, and pushes after asking.
 
 Only ``result.json``, ``report.html`` and ``provenance.json`` are ever
@@ -87,8 +87,14 @@ def scan_files(files: list[Path], vm_ips: set[str]) -> ScanResult:
 
 
 def destination_name(result: dict[str, Any]) -> str:
+    """``<YYYY-MM-DD>-<HHMMSS>Z-<target>-<profile>``: unique per run start.
+
+    The time (UTC, to the second) keeps two runs of the same target and
+    profile on one day in separate folders.
+    """
     run = result["run"]
-    stamp = (run.get("started_at") or run["created_at"])[:10]
+    when = run.get("started_at") or run["created_at"]
+    stamp = f"{when[:10]}-{when[11:13]}{when[14:16]}{when[17:19]}Z"
     target = result["provenance"]["target"]["name"]
     profile = result["provenance"]["profile"]["name"]
     name = f"{stamp}-{target}-{profile}"

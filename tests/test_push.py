@@ -35,7 +35,7 @@ def test_prepare_copies_only_the_allowlist(tmp_path):
     plan = push.prepare(run_dir, tmp_path / "repo")
     assert sorted(p.name for p in plan.files) == sorted(push.ALLOWLIST)
     assert plan.scan.clean, plan.scan.problems
-    assert plan.destination.name == "2026-11-01-kaunas-v5-piz-palu-dev"
+    assert plan.destination.name == "2026-11-01-123000Z-kaunas-v5-piz-palu-dev"
 
 
 def test_vm_ip_in_result_is_refused(tmp_path):
@@ -100,3 +100,11 @@ def test_vm_ips_found_from_a_target_result_dir(tmp_path):
     result["run"]["notes"] = "via 203.0.113.9"
     write_result(target_dir, result)
     assert not push.prepare(target_dir, tmp_path / "repo").scan.clean
+
+
+def test_same_day_runs_get_separate_folders():
+    first = sample_result()
+    second = sample_result()
+    second["run"]["started_at"] = "2026-11-01T15:04:05Z"
+    assert push.destination_name(first) != push.destination_name(second)
+    assert push.destination_name(second) == "2026-11-01-150405Z-kaunas-v5-piz-palu-dev"
