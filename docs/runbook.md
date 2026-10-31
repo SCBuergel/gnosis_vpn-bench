@@ -38,7 +38,22 @@ This creates `<runs_dir>/<id>/run.toml` and refuses a profile and target
 on different networks. Edit `run.toml` to change VM sizes, the region, the
 number of clients, the deletion deadline or the ladder. Defaults: one
 `c-2` origin plus three `c-4` clients in `fra1`; a 4 h deadline;
-200,000,000-byte transfers, a 300 s deadline, 10 s gaps and rungs 1, 2, 3.
+200,000,000-byte transfers, a 90 s deadline, 10 s gaps and rungs 1, 2, 3.
+Runs planned before 2026-10-31 used a 300 s deadline; a slow exit then
+spent the full 300 s per rung for the same overlap-based rate.
+
+Before the first droplet, `provision` (and so `execute`) checks every
+target on the network's indexer: the exit must be a registered node with
+an announced address, and for a v5 profile that discovers exits it must
+announce a `gvpn:exit` service. A failed check creates nothing.
+
+Connecting gives up on a client early when the exit refuses its
+registration twice (HTTP 404 on `clients/register`, i.e. no free slot),
+or once when the exit already reports no free slot. The ladder then uses
+only the connected clients: a rung needing more fails with that client's
+status (usually `http_404_register`). A client that dropped before a rung
+is reconnected once; the rung's `detail` says so, and its `gap_before_s`
+shows the real gap.
 
 ## The usual way: `execute`
 

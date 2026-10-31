@@ -1,0 +1,10 @@
+label = "Lisbon"
+exit_address = "0xafc2522b9eab68b016977e57510dab7a03ff8004"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Lisbon"
+notes = """
+New exit (peer 12D3KooWSD3h2HLNqLK5nUjsrPHCFKo4qaJW2GuqM8uuVYF54Y5M), registered
+on jura-prod with a QUIC multiaddress on 2026-10-31. Not in the packaged
+config, so the run installs client-configs/v4-jura-prod-with-lisbon.toml."""
+client_config = "client-configs/v4-jura-prod-with-lisbon.toml"

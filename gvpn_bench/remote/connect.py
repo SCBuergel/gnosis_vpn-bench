@@ -10,6 +10,10 @@ A connection only counts when all of these hold:
   the WAN device.
 
 Failures are classified into the fixed status list (results/schema.py).
+
+A client whose registration the exit keeps refusing (HTTP 404 on
+``clients/register``: in practice, no free slot) is given up after
+``REGISTER_REFUSALS`` refusals instead of waiting out the whole timeout.
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ from ..status import Destination
 from ..vpn import CtlError, VpnClient
 
 log = logging.getLogger("gnosis_speedtest")
+
+REGISTER_REFUSALS = 2  # 404s on clients/register before giving up (one if the exit reports no free slot)
+LOG_CHECK_INTERVAL_S = 10.0
 
 
 def vpn_for(host: Host, profile: Profile) -> VpnClient:
@@ -75,6 +82,7 @@ def connect_client(
     route_checks: list[str],
     timeout_s: float = 240,
 ) -> ConnectOutcome:
+    """Start the worker, then connect to the exit (see ``connect_to``)."""
     vpn = vpn_for(host, profile)
     try:
         vpn.ctl("start-client", "30m", timeout_s=45)
@@ -82,13 +90,30 @@ def connect_client(
         return ConnectOutcome(host.name, "control_timeout" if "timed out" in str(error) else "error", str(error))
     if not wait_running(vpn):
         return ConnectOutcome(host.name, "worker_not_ready", "worker did not reach Running with destinations")
-    status = vpn.status()
+    return connect_to(host, vm_ip, profile, exit_address, route_checks=route_checks, timeout_s=timeout_s)
+
+
+def connect_to(
+    host: Host,
+    vm_ip: str,
+    profile: Profile,
+    exit_address: str,
+    *,
+    route_checks: list[str],
+    timeout_s: float = 240,
+) -> ConnectOutcome:
+    """Connect a running worker to the exit and prove the tunnel; also used to reconnect."""
+    vpn = vpn_for(host, profile)
+    status = vpn.try_status()
+    if status is None:
+        return ConnectOutcome(host.name, "worker_not_ready", "no status from the worker")
     try:
         destination = status.find_by_address(exit_address)
     except ValueError as error:
         return ConnectOutcome(host.name, "error", str(error))
     if destination is None:
         return ConnectOutcome(host.name, "DestinationNotFound", f"{exit_address} not in client destinations")
+    since = utc_stamp()
     t0 = time.monotonic()
     try:
         response = vpn.ctl("connect", destination.id, timeout_s=45)
@@ -98,13 +123,21 @@ def connect_client(
     if "Connect" not in response:
         return ConnectOutcome(host.name, "connect_rejected", json.dumps(response)[:300], destination=destination)
     connected = False
+    refused: list[str] = []
     last_status = status
+    next_log_check = t0 + LOG_CHECK_INTERVAL_S
     while time.monotonic() < t0 + timeout_s:
         current = vpn.try_status()
         if current is not None:
             last_status = current
             if current.connected_id == destination.id:
                 connected = True
+                break
+        if time.monotonic() >= next_log_check:
+            next_log_check = time.monotonic() + LOG_CHECK_INTERVAL_S
+            refused = register_refusals(worker_log_tail(host, profile), since)
+            no_slot = free_slots(last_status.probe) == 0
+            if len(refused) >= REGISTER_REFUSALS or (refused and no_slot):
                 break
         time.sleep(2)
     elapsed = round(time.monotonic() - t0, 2)
@@ -114,14 +147,12 @@ def connect_client(
         "connecting_phase": last_status.connecting_phase,
     }
     if not connected:
-        evidence["worker_log_findings"] = log_findings(worker_log_tail(host, profile))
-        return ConnectOutcome(
-            host.name,
-            classify_failure(evidence),
-            f"not connected after {timeout_s:.0f} s",
-            destination=destination,
-            evidence=evidence,
-        )
+        evidence["worker_log_findings"] = refused[-5:] or log_findings(worker_log_tail(host, profile))
+        if refused:
+            detail = f"exit refused registration {len(refused)}x in {elapsed:.0f} s (no free slot?)"
+        else:
+            detail = f"not connected after {timeout_s:.0f} s"
+        return ConnectOutcome(host.name, classify_failure(evidence), detail, destination=destination, evidence=evidence)
     egress = host.run(["curl", "-4", "-fsS", "--max-time", "30", "https://api.ipify.org"], timeout_s=40)
     egress_ip = egress.stdout.strip() if egress.ok else None
     if egress_ip is None:
@@ -134,6 +165,40 @@ def connect_client(
     if not routes_ok:
         return ConnectOutcome(host.name, "route_bypass", "a measurement destination bypasses the tunnel", elapsed)
     return ConnectOutcome(host.name, "connected", "", elapsed, destination, egress_ip, evidence)
+
+
+def utc_stamp() -> str:
+    """Now as the worker logs it (UTC, ISO 8601, microseconds), for ordering log lines."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int(time.time() % 1 * 1e6):06d}Z"
+
+
+def register_refusals(log_text: str, since: str) -> list[str]:
+    """Log lines at or after *since* where the exit answered 404 to ``clients/register``.
+
+    Lines without a leading UTC timestamp are ignored, so an unknown log
+    format never ends a connect attempt early.
+    """
+    found = []
+    for line in log_text.splitlines():
+        stamp = line.split(" ", 1)[0]
+        if len(stamp) < 20 or not stamp.endswith("Z") or stamp[4] != "-" or stamp[10] != "T":
+            continue
+        if stamp >= since and "clients/register" in line and "404" in line:
+            found.append(line)
+    return found
+
+
+def free_slots(probe: dict[str, Any] | None) -> int | None:
+    """Free session slots the exit reported in the client's last probe, if any."""
+    slots = ((probe or {}).get("load") or {}).get("slots") or {}
+    value = slots.get("available")
+    return value if isinstance(value, int) else None
+
+
+def total_slots(probe: dict[str, Any] | None) -> int | None:
+    slots = ((probe or {}).get("load") or {}).get("slots") or {}
+    value = slots.get("total")
+    return value if isinstance(value, int) else None
 
 
 _LOG_TAIL = 'f=$(ls -1 $1 2>/dev/null | tail -1); [ -n "$f" ] && tail -c 200000 "$f" || true\n'

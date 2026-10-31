@@ -116,7 +116,7 @@ class InfraSpec:
 @dataclass(frozen=True)
 class LadderSpec:
     transfer_bytes: int = 200_000_000
-    deadline_s: int = 300
+    deadline_s: int = 90  # 300 before 2026-10-31; rates use the overlap either way
     gap_s: int = 10
     rungs: tuple[int, ...] = (1, 2, 3)
     ping_target: str = "9.9.9.9"

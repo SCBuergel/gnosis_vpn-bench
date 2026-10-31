@@ -27,9 +27,9 @@ from ..results.store import (
     write_result,
 )
 from ..runs import Run, UserConfig, utc_now, write_private_json
-from . import deadline, guards
+from . import deadline, guards, preflight
 from .backup import backup_identity, save_safe_info
-from .connect import ConnectOutcome, connect_client, disconnect, vpn_for
+from .connect import ConnectOutcome, connect_client, connect_to, disconnect, vpn_for
 from .digitalocean import Api, load_token, run_tag
 from .inventory import Machine, clients, host_for, load_inventory, machine
 from .ladder import run_ladder
@@ -55,7 +55,17 @@ def _parallel(function, items):
 # -- provision ---------------------------------------------------------------
 
 
+def step_preflight(run: Run, profile: Profile) -> None:
+    """Refuse to create VMs for a target the network's indexer does not know."""
+    problems = preflight.check(profile, run.config.targets(), run_client_config=run.config.client_config is not None)
+    if problems:
+        raise RuntimeError("pre-flight check failed, no VM created:\n  " + "\n  ".join(problems))
+    log.info("pre-flight: every target is a registered, announced node on %s", profile.network.name)
+
+
 def step_provision(user: UserConfig, run: Run, profile: Profile) -> None:
+    if not load_inventory(run):  # only before the first droplet; a resumed provision has passed it
+        step_preflight(run, profile)
     provision(run, profile, api_for(user))
 
 
@@ -193,18 +203,43 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
 # -- ladder and sweep -----------------------------------------------------------
 
 
+RECONNECT_TIMEOUT_S = 120
+
+
+def connect_statuses(run: Run, target: Target) -> dict[str, str] | None:
+    """Each client's connect status for *target*, or None before ``connect`` ran."""
+    entries = _read(run, f"connect-{target.name}.json")
+    return {e["client"]: e["status"] for e in entries} if entries is not None else None
+
+
 def step_ladder(run: Run, profile: Profile, target: Target) -> list[dict[str, Any]]:
     origin = machine(run, "origin")
     origin_sha = json.loads((run.state / "origin.json").read_text())["sha256"]
+    pairs = client_hosts(run)
+    statuses = connect_statuses(run, target)
+    if statuses is None:  # no connect record: every client must prove itself before each rung
+        statuses = {host.name: "connected" for _, host in pairs}
+    ips = {host.name: str(entry.ip) for entry, host in pairs}
+    route_checks = [str(origin.ip), run.config.ladder.ping_target]
+
+    def reconnect(host: Host) -> bool:
+        outcome = connect_to(
+            host, ips[host.name], profile, target.exit_address, route_checks=route_checks, timeout_s=RECONNECT_TIMEOUT_S
+        )
+        log.info("%s: reconnect → %s %s", host.name, outcome.status, outcome.detail)
+        return outcome.status == "connected"
+
     started = utc_now()
     rungs = run_ladder(
         run,
         profile,
         target,
-        [h for _, h in client_hosts(run)],
+        [h for _, h in pairs if statuses.get(h.name) == "connected"],
         str(origin.ip),
         origin_sha,
         data_dir=run.data / target.name,
+        unavailable={name: status for name, status in statuses.items() if status != "connected"},
+        reconnect=reconnect,
     )
     write_private_json(
         run.state / f"ladder-{target.name}.json",

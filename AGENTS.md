@@ -33,8 +33,9 @@ Keep it that way.
   Never substitute another exit or a direct download for a failed tunnel.
 - A missing measurement is `null` with a status from the fixed list, never 0.
 - Ladder rates use only the common overlap (latest start → earliest end).
-  Keep 200,000,000-byte transfers, shared UTC starts, 300 s deadlines and
-  10 s gaps unless the user changes the test specification.
+  Keep 200,000,000-byte transfers, shared UTC starts, 90 s deadlines and
+  10 s gaps unless the user changes the test specification (the user
+  shortened the deadline from 300 s to 90 s on 2026-10-31).
 - v5 workers are per-user: control them with `runuser -u <user> --`; root
   cannot own one. Inspect JSON responses, not exit codes alone.
 - Back up identities before funding. Never retry an ambiguous transaction

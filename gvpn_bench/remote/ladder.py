@@ -5,9 +5,15 @@ UTC instant. Each transfer has the shared deadline; the next rung starts
 ``gap_s`` after the last transfer of the previous rung ended. The next rung
 is scheduled *before* anything else is fetched or computed so the gap holds.
 
+Only clients that connected to the target take part. A rung needing more
+clients than connected is ``failed`` with the first missing client's
+connect status (often ``http_404_register``: the exit has fewer slots than
+the run has clients), and later rungs are ``not_run``.
+
 Before every rung each client must still be connected to the target exit.
-If one is not, that rung is ``failed`` and later rungs are ``not_run``;
-nothing is measured through another exit or without the tunnel.
+A client that dropped is reconnected once (``reconnect``); if that fails,
+the rung is ``failed`` and later rungs are ``not_run``. Nothing is measured
+through another exit or without the tunnel.
 """
 
 from __future__ import annotations
@@ -165,6 +171,23 @@ def rung_entry(
     }
 
 
+def check_connected(
+    hosts: list[Host],
+    profile: Profile,
+    target: Target,
+    reconnect: Callable[[Host], bool] | None,
+) -> tuple[list[str], list[str]]:
+    """(lost, reconnected) client names; each lost client gets one reconnect attempt."""
+    connected = parallel(partial(still_connected, profile=profile, target=target), hosts)
+    dropped = [h for h in hosts if not connected[h.name]]
+    if not dropped or reconnect is None:
+        return [h.name for h in dropped], []
+    log.warning("reconnecting %s to the target", ", ".join(h.name for h in dropped))
+    retried = parallel(reconnect, dropped)
+    lost = [name for name, ok in retried.items() if not ok]
+    return lost, [name for name, ok in retried.items() if ok]
+
+
 def run_ladder(
     run: Run,
     profile: Profile,
@@ -173,7 +196,16 @@ def run_ladder(
     origin_ip: str,
     origin_sha256: str,
     data_dir: Path | None = None,
+    *,
+    unavailable: dict[str, str] | None = None,
+    reconnect: Callable[[Host], bool] | None = None,
 ) -> list[dict[str, Any]]:
+    """Run the rungs with *client_hosts*, the clients connected to the target.
+
+    *unavailable* maps clients that did not connect to their connect status;
+    *reconnect* is tried once for a client that dropped before a rung.
+    """
+    unavailable = unavailable or {}
     spec = run.config.ladder
     data_dir = data_dir or run.data
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -188,13 +220,26 @@ def run_ladder(
         if any(r["status"] != "measured" for r in rungs):
             rungs.append(empty_rung(rung, names, "not_run", "not_run"))
             continue
-        connected = parallel(partial(still_connected, profile=profile, target=target), hosts)
-        if not all(connected.values()):
-            lost = ", ".join(n for n, ok in connected.items() if not ok)
-            log.error("rung %d: not connected to the target: %s", rung, lost)
-            rungs.append(empty_rung(rung, names, "failed", "timeout", f"not connected to the target: {lost}"))
+        if rung > len(client_hosts):
+            missing = sorted(unavailable.items())
+            status = missing[0][1] if missing else "not_run"
+            causes = ", ".join(f"{name}: {why}" for name, why in missing) or "too few clients"
+            detail = f"only {len(client_hosts)} client(s) connected to the target ({causes})"
+            log.error("rung %d: %s", rung, detail)
+            rungs.append(empty_rung(rung, names, "failed", status, detail))
+            continue
+        lost, reconnected = check_connected(hosts, profile, target, reconnect)
+        if lost:
+            log.error("rung %d: not connected to the target: %s", rung, ", ".join(lost))
+            detail = f"not connected to the target: {', '.join(lost)}"
+            if reconnect is not None:
+                detail += " (one reconnect attempt failed)"
+            rungs.append(empty_rung(rung, names, "failed", "timeout", detail))
             continue
         start_at = next_start if next_start is not None else time.time() + FIRST_RUNG_LEAD_S
+        if reconnected:
+            # A reconnect outlasts the gap; start afresh (gap_before_s records the real gap).
+            start_at = max(start_at, time.time() + FIRST_RUNG_LEAD_S)
         if start_at - time.time() < MIN_LEAD_S:
             log.error("rung %d: too late to keep the %ss gap", rung, spec.gap_s)
             rungs.append(empty_rung(rung, names, "failed", "error", "too late to keep the inter-rung gap"))
@@ -223,6 +268,8 @@ def run_ladder(
         previous_end = last_end
         raw_by_rung[rung] = raw
         rungs.append(rung_entry(rung, raw, origin_sha256, gap))
+        if reconnected:
+            rungs[-1]["detail"] = f"reconnected before this rung: {', '.join(reconnected)}"
         log.info("rung %d: %s Mbit/s", rung, rungs[-1]["total_mbps"])
     # All rungs done: now fetch the complete ping logs and recompute.
     for position, rung in enumerate(spec.rungs):
@@ -234,5 +281,7 @@ def run_ladder(
             if pings is not None:
                 raw[host.name]["pings"] = pings
             (data_dir / f"rung{rung}-{host.name}.json").write_text(json.dumps(raw[host.name]))
+        detail = rungs[position]["detail"]
         rungs[position] = rung_entry(rung, raw, origin_sha256, rungs[position]["gap_before_s"])
+        rungs[position]["detail"] = detail
     return rungs

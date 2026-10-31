@@ -92,7 +92,7 @@ appear in `failures`.
 | Key | Notes |
 |-----|-------|
 | `spec.transfer_bytes` | 200,000,000 by default |
-| `spec.deadline_s` | Shared per-rung deadline (300) |
+| `spec.deadline_s` | Shared per-rung deadline (90; 300 for runs planned before 2026-10-31) |
 | `spec.gap_s` | Gap between the end of one rung and the next start (10) |
 | `spec.ping_target`, `spec.ping_interval_s` | `9.9.9.9`, 1 s |
 | `origin` | `{bytes, sha256}` of the served file |
@@ -107,7 +107,7 @@ Each rung:
 | `clients` | Client names in this rung |
 | `status` | `measured`, `failed` or `not_run` |
 | `failure_status` | From the fixed list; required unless `measured` |
-| `detail` | Optional; why an unmeasured rung has no data |
+| `detail` | Optional; why an unmeasured rung has no data, or a note on a measured one (e.g. a client reconnected before it) |
 | `total_mbps` | Sum of per-client overlap rates; `null` unless `measured` |
 | `overlap_s`, `start_skew_ms`, `gap_before_s` | Overlap length, spread of start times, actual gap since the previous rung |
 | `overlap_start`, `overlap_end` | Optional timestamps |
