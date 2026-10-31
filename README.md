@@ -1,23 +1,36 @@
-# Gnosis VPN Speed Tester
+# Gnosis VPN bench
 
-Automated throughput and latency benchmarking for Gnosis VPN tunnels.
-Connects to each configured exit in turn, runs downloads/uploads against
-Cloudflare's anycast speed-test endpoint, and writes structured results
-(JSON + plain-text report + debug log) to `logs/`.
+Throughput, latency and availability tests for Gnosis VPN exits. One tool,
+two places to run:
+
+* **Locally** against the `gnosis_vpn-ctl` on this machine (the modes below).
+* **On disposable DigitalOcean VMs**: the same modes over SSH, plus a
+  1 → 2 → 3 concurrent-client ladder and an exit availability sweep, with
+  funding, recovery and VM deletion handled by the tool.
+
+Every remote run produces a versioned `result.json`
+([schema](docs/result-schema.md)) and a self-contained `report.html`.
+Findings live in the separate, private results repository, not here.
 
 ## Prerequisites
 
-- **Gnosis VPN service running** with `gnosis_vpn-ctl` on `PATH`
-- Python 3.11+ (standard library only, no pip packages)
-- `curl`
-- `sudo` rights (the script writes `nameserver 1.1.1.1` to `/etc/resolv.conf`
-  after each VPN connect to work around DNS leaks)
+Local modes:
+
+- Gnosis VPN running, with `gnosis_vpn-ctl` on `PATH` (v4 0.97+ or v5;
+  older `--json` builds are detected automatically)
+- Python 3.11+ (standard library only) and `curl`
+- `sudo` only if the DNS workaround is needed (see `--dns` below)
+
+Remote runs additionally need `ssh`, `ssh-keygen`, a user systemd instance
+(for the deletion timer), and for `fund`/`recover`:
+`pip install '.[remote]'` (web3). Credentials are read from the files named
+in `~/.config/gvpn-bench/config.toml`; see [the runbook](docs/runbook.md).
 
 ## Quick start
 
 ```bash
 # Verify VPN is up and has exits configured
-gnosis_vpn-ctl --json status
+gnosis_vpn-ctl -o json status
 
 # Run the default full benchmark (baseline + all exits, 5 runs each)
 ./gnosis_vpn-bench locations
@@ -40,6 +53,42 @@ Output lands in `logs/`:
 With `-o FILE`, a **live JSON file** is also written after every individual test
 completes.  This is useful for monitoring long runs or feeding results into a
 dashboard.  The file is written atomically (write-to-tmp + rename).
+
+## Where to run
+
+```bash
+./gnosis_vpn-bench ramp                              # this machine
+./gnosis_vpn-bench --ssh root@203.0.113.5 ramp       # any SSH host
+./gnosis_vpn-bench --ssh root@host --ctl-user gvpnbench ramp   # v5 per-user worker
+./gnosis_vpn-bench --run RUN --on client2 gap        # a VM of a remote run
+```
+
+`--target NAME` (or `--exit ADDRESS`) limits a mode to one exit;
+`targets/*.toml` lists known exits. `--run` implies the run's target.
+
+`--dns auto` (default) rewrites `/etc/resolv.conf` to `1.1.1.1` only if a
+name lookup fails after connecting, and restores the original file at exit.
+`--dns always` is the old unconditional behaviour; `--dns never` leaves DNS
+alone. Remote VMs never get the rewrite.
+
+## Remote runs
+
+```bash
+./gnosis_vpn-bench plan --profile v4-jura-prod --target serbia-jura-prod
+./gnosis_vpn-bench provision RUN     # asks first; costs money
+./gnosis_vpn-bench fund RUN          # asks first; moves funds
+./gnosis_vpn-bench connect RUN
+./gnosis_vpn-bench ladder RUN        # and/or: sweep RUN
+./gnosis_vpn-bench recover RUN       # asks first; returns funds
+./gnosis_vpn-bench destroy RUN       # asks first; deletes this run's VMs
+./gnosis_vpn-bench status RUN
+./gnosis_vpn-bench report RUN
+./gnosis_vpn-bench results push RUN --dry-run
+```
+
+Profiles (`profiles/*.toml`) pin network, channel, package and worker
+model; targets (`targets/*.toml`) pin an exit to a network. Read
+[docs/runbook.md](docs/runbook.md) before a live run.
 
 ## Test modes
 
@@ -426,7 +475,7 @@ end-to-end VPN tunnel.  Cloudflare anycast avoids this problem.
 
 ## Tuning
 
-All timing constants are near the top of `./gnosis_vpn-bench`:
+All timing constants are in `gvpn_bench/settings.py`:
 
 | Constant | Default | Description |
 |----------|---------|-------------|
@@ -467,11 +516,11 @@ listed samples.
 
 ## Troubleshooting
 
-- **"No VPN destinations found"** -- `gnosis_vpn-ctl --json status` returns no
-  destinations.  Check that the VPN service is running and exits are configured.
-- **All downloads fail with timeout** -- The DNS fix writes `1.1.1.1` to
-  `resolv.conf`; if that is blocked, curl cannot resolve `speed.cloudflare.com`.
-  Check firewall rules on the exit.
+- **"No VPN destinations found"** -- `gnosis_vpn-ctl -o json status` returns no
+  destinations (or none matches `--exit`/`--target`). Check that the worker is
+  running and the exit is on the client's network.
+- **All downloads fail with timeout** -- try `--dns always`; if `1.1.1.1` is
+  blocked too, curl cannot resolve `speed.cloudflare.com`.
 - **PoP shows unexpected location** -- Cloudflare anycast routing is
   best-effort; the PoP may not match the exit's city exactly.
 - **Debug details** -- Every `gnosis_vpn-ctl` and `curl` invocation is logged
