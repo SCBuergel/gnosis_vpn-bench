@@ -96,3 +96,8 @@ def test_execute_measures_every_target_then_tears_down(faked):
 def test_destroy_without_confirmed_funding_skips_recovery(tmp_path):
     run = plan_run(user_config(tmp_path), "v4-jura-prod", "austria-jura-prod", run_id="d1")
     assert not steps.funds_sent(run)
+
+
+def test_default_id_for_two_targets_is_valid(tmp_path):
+    run = plan_run(user_config(tmp_path), "v4-jura-prod", ["netherlands-jura-prod", "austria-jura-prod"])
+    assert "netherlands-jura-prod_austria-jura-prod" in run.config.id

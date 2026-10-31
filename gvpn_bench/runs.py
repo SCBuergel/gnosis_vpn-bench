@@ -318,7 +318,7 @@ def plan_run(
     for target in targets:
         check_compatible(profile, target)
     run_id = run_id or default_run_id(
-        profile_name, "+".join(names) if len(names) < 3 else f"{len(names)}exits"
+        profile_name, "_".join(names) if len(names) < 3 else f"{len(names)}exits"
     )
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError(f"invalid run id {run_id!r}")
