@@ -54,6 +54,11 @@ def fmt(value: Any, digits: int = 2) -> str:
     return str(value)
 
 
+def tick(value: float) -> str:
+    """Axis label: whole numbers from 100 up, three significant digits below."""
+    return f"{value:,.0f}" if abs(value) >= 100 else f"{value:.3g}"
+
+
 def table(headers: list[str], rows: list[list[Any]]) -> str:
     head = "".join(f"<th>{escape(h)}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{escape(fmt(v))}</td>" for v in row) + "</tr>" for row in rows)
@@ -84,7 +89,7 @@ def rung_chart(rungs: list[dict[str, Any]]) -> str:
     for i in range(5):
         value = ymax * i / 4
         parts.append(f'<path d="M{left},{y(value):.1f} H{width - right}" stroke="var(--grid)"/>')
-        parts.append(f'<text x="{left - 8}" y="{y(value) + 4:.1f}" text-anchor="end">{value:.3g}</text>')
+        parts.append(f'<text x="{left - 8}" y="{y(value) + 4:.1f}" text-anchor="end">{tick(value)}</text>')
     parts.append(f'<text x="{left}" y="14">Mbit/s over the common overlap</text>')
     clients: list[str] = []
     for index, rung in enumerate(rungs):
@@ -145,7 +150,7 @@ def line_chart(title: str, unit: str, series: list[tuple[str, list[float], list[
     for i in range(5):
         value = ymax * i / 4
         parts.append(f'<path d="M{left},{py(value):.1f} H{width - right}" stroke="var(--grid)"/>')
-        parts.append(f'<text x="{left - 8}" y="{py(value) + 4:.1f}" text-anchor="end">{value:.3g}</text>')
+        parts.append(f'<text x="{left - 8}" y="{py(value) + 4:.1f}" text-anchor="end">{tick(value)}</text>')
     parts.append(f'<text x="{left}" y="14">{escape(title)} ({escape(unit)})</text>')
     parts.append(
         f'<text x="{width - right}" y="{height - 6}" text-anchor="end">seconds since scheduled start</text>'
