@@ -143,10 +143,11 @@ def safe_call(w3: Any, safe_address: str, owner: Any, target: str, data: bytes =
     return call
 
 
-def _nonce_taken_by_confirmed(entries: list[dict[str, Any]], entry: dict[str, Any]) -> bool:
+def _nonce_taken_by_mined(entries: list[dict[str, Any]], entry: dict[str, Any]) -> bool:
+    """Another journal entry of ours, mined (even if reverted), used this nonce."""
     return any(
         other is not entry
-        and other["status"] == "confirmed"
+        and other["status"] in ("confirmed", "reverted")
         and other["sender"].lower() == entry["sender"].lower()
         and other["nonce"] == entry["nonce"]
         for other in entries
@@ -186,7 +187,7 @@ class Journal:
         """Resolve entries from receipts; raise if any stays ambiguous.
 
         * receipt found → ``confirmed`` / ``reverted``;
-        * nonce consumed by another *confirmed* entry of ours → ``superseded``
+        * nonce consumed by another mined (confirmed or reverted) entry of ours → ``superseded``
           (it can never execute);
         * pending, nonce unused, unknown to the node → ``dropped``; the next
           send from that sender is forced to reuse that nonce (see ``send``);
@@ -195,9 +196,9 @@ class Journal:
         """
         entries = self.entries()
         unresolved = []
-        for entry in entries:
-            if entry["status"] not in ("pending", "dropped"):
-                continue
+        open_entries = [e for e in entries if e["status"] in ("pending", "dropped")]
+        # Pass 1: apply every receipt, so pass 2 sees all mined entries.
+        for entry in open_entries:
             try:
                 receipt = w3.eth.get_transaction_receipt(entry["hash"])
             except Exception:  # web3 raises TransactionNotFound
@@ -205,8 +206,11 @@ class Journal:
             if receipt is not None:
                 entry["status"] = "confirmed" if receipt["status"] == 1 else "reverted"
                 entry["block"] = receipt["blockNumber"]
+        # Pass 2: classify what is still open.
+        for entry in open_entries:
+            if entry["status"] not in ("pending", "dropped"):
                 continue
-            if _nonce_taken_by_confirmed(entries, entry):
+            if _nonce_taken_by_mined(entries, entry):
                 entry["status"] = "superseded"
                 continue
             confirmed_nonce = w3.eth.get_transaction_count(entry["sender"], "latest")
