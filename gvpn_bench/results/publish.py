@@ -121,6 +121,12 @@ def stage_report(
 # -- reading the repository ------------------------------------------------------
 
 
+def existing_links(repo: Path, name: str) -> dict[str, str]:
+    """Links already attached to reports/<name> (kept when the report is regenerated)."""
+    meta = repo / "reports" / folder_name(name) / "report.json"
+    return json.loads(meta.read_text()).get("links", {}) if meta.exists() else {}
+
+
 def repo_recordings(repo: Path) -> dict[str, Recording]:
     return {p.parent.name: load_recording(p.parent) for p in sorted((repo / "runs").glob("*/result.json"))}
 

@@ -43,6 +43,7 @@ def faked(tmp_path, monkeypatch):
     monkeypatch.setattr(provision, "preflight", lambda run, profile: None)
     monkeypatch.setattr(provision, "describe_plan", lambda run, profile: "plan")
     monkeypatch.setattr(runcli, "_teardown", lambda user, run, profile: calls.append("teardown") or True)
+    monkeypatch.setattr(runcli, "auto_push", lambda run: calls.append("push") or True)
     return run, calls, monkeypatch
 
 
@@ -88,7 +89,7 @@ def test_execute_measures_every_target_then_tears_down(faked):
     monkeypatch.setattr(steps, "step_ladder", lambda run, profile, target: [])
     monkeypatch.setattr(steps, "step_result", lambda run, profile, target: run.path / target.name)
     assert runcli.cmd_execute(args(run)) == 0
-    assert calls == ["netherlands-jura-prod", "austria-jura-prod", "teardown"]
+    assert calls == ["netherlands-jura-prod", "push", "austria-jura-prod", "push", "teardown"]
 
 
 def test_destroy_without_confirmed_funding_skips_recovery(tmp_path):
@@ -248,3 +249,55 @@ def test_declining_the_funding_prompt_sends_nothing_and_tears_down(faked):
     monkeypatch.setattr(steps, "step_fund_send", lambda *a: pytest.fail("funds sent without consent"))
     assert runcli.cmd_execute(argparse.Namespace(run=str(run.path), yes=False, keep=False, target=None)) == 1
     assert calls == ["teardown"]
+
+
+def test_execute_pushes_final_results_before_teardown(faked):
+    run, calls, monkeypatch = faked
+    monkeypatch.setattr(steps, "step_provision", lambda *a: run.mark("provision"))
+    monkeypatch.setattr(steps, "step_fund_plan", lambda *a: {"nodes": []})
+    monkeypatch.setattr(steps, "step_fund_send", lambda *a: run.mark("fund"))
+    monkeypatch.setattr(steps, "step_connect", lambda user, run, profile, target: [])
+
+    def ladder_then_fail(run, profile, target):
+        raise RuntimeError("SSH lost")
+
+    monkeypatch.setattr(steps, "step_ladder", ladder_then_fail)
+    (run.path / "results" / "netherlands-jura-prod").mkdir(parents=True)
+    (run.path / "results" / "netherlands-jura-prod" / "result.json").write_text("{}")
+    assert runcli.cmd_execute(args(run)) == 1
+    assert calls == ["push", "teardown"]
+
+
+def test_auto_push_never_raises(tmp_path, monkeypatch, capsys):
+    run = plan_run(user_config(tmp_path), "v4-jura-prod", "austria-jura-prod", run_id="ap")
+
+    def boom(args):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(runcli, "cmd_results_push", boom)
+    assert runcli.auto_push(run) is False
+    assert "RESULTS NOT PUSHED" in capsys.readouterr().out
+    monkeypatch.setattr(runcli, "cmd_results_push", lambda args: 1)
+    assert runcli.auto_push(run) is False
+
+
+@pytest.mark.parametrize("no_push, expected", [(False, ["push"]), (True, [])])
+def test_ladder_pushes_unless_told_not_to(tmp_path, monkeypatch, no_push, expected):
+    user = user_config(tmp_path)
+    run = plan_run(user, "v4-jura-prod", "austria-jura-prod", run_id="lp")
+    calls = []
+    monkeypatch.setattr(runcli, "load_user_config", lambda: user)
+    monkeypatch.setattr(steps, "step_ladder", lambda run, profile, target: [])
+    monkeypatch.setattr(steps, "step_result", lambda run, profile, target: run.path)
+    monkeypatch.setattr(runcli, "auto_push", lambda run: calls.append("push"))
+    runcli.cmd_ladder(argparse.Namespace(run=str(run.path), target=None, no_push=no_push))
+    assert calls == expected
+
+
+def test_execute_help_says_results_are_pushed_before_teardown(capsys):
+    from gvpn_bench.cli import main
+
+    with pytest.raises(SystemExit):
+        main(["execute", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "pushed to the private results repo" in text and "BEFORE recover and destroy" in text

@@ -49,7 +49,11 @@ number of clients, the deletion deadline or the ladder. Defaults: one
 client's request, before sending funds (`--yes` answers both). Declining the funding prompt
 ends the run and tears it down, deleting the droplets just provisioned. It then
 runs steps 2–7 below: the same funded clients connect to and ladder each
-target in turn. Teardown (recover, then
+target in turn. Results are pushed to the private results repo without
+asking (step 8): after each target, and once more with all of the run's
+results before teardown. A refused scan or a failed push is reported
+loudly (`RESULTS NOT PUSHED`) but never blocks teardown or the deletion
+timer; retry with `results push RUN`. Teardown (recover, then
 destroy) always runs at the end, including after an error or Ctrl-C. If
 teardown itself fails, it says so; the deletion timer is still armed, and
 `recover RUN` / `destroy RUN` can be rerun by hand. `--keep` skips
@@ -128,8 +132,9 @@ reboots the VM once after 12 min.
 
 `ladder` and `sweep` write `result.json`, `report.html` and
 `provenance.json` to `RUN/results/<target>/` (a sweep reports under the
-run's first target). A rung whose clients are not all still connected is `failed`;
-the rungs after it are `not_run`.
+run's first target), then push them to the private results repo without
+asking (`--no-push` to skip). A rung whose clients are not all still
+connected is `failed`; the rungs after it are `not_run`.
 
 ## 6. Recover
 
@@ -181,6 +186,12 @@ Each folder has `README.md` and `charts/*.svg`, which GitHub renders on
 the web and in its app, plus `report.html` (the same report as one page).
 Recordings also keep `result.json` and `provenance.json`.
 
+Results are pushed automatically by `ladder`, `sweep` and `execute` as
+soon as they exist, before any machine is destroyed; run `results push`
+by hand only to retry or to publish several runs together. A single
+run's report is named after the run id, so later pushes update it and
+keep links attached with `results link`.
+
 `results push` adds the given runs' recordings and one report over all of
 them: one line per exit in the overview chart, and error bars (min to max
 around the mean) where the same exit, network, profile and client package
@@ -193,8 +204,9 @@ were recorded more than once. Other commands:
 ```
 
 Every command scans all generated files and refuses private keys, tokens
-and VM or other public IP addresses. It refuses public repositories and
-asks before writing, committing and pushing. It never creates the results
+and VM or other public IP addresses, writes only allow-listed file names,
+and refuses public repositories. It does not ask before writing,
+committing and pushing (`--ask` adds a prompt; `--dry-run` only scans). It never creates the results
 repository; create it on GitHub as **private** yourself.
 
 ## Status at any time

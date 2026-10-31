@@ -79,8 +79,9 @@ alone. With `--run`, DNS is never touched on the run's VMs, whatever
 ./gnosis_vpn-bench execute RUN       # everything below in one go, then recover + destroy
 ```
 
-`execute` always recovers funds and deletes the droplets at the end, also
-after an error or Ctrl-C. `--keep` leaves them running, but the deletion
+`execute` pushes results to the private results repo as soon as each
+exit is measured and again before teardown (no prompt), then always
+recovers funds and deletes the droplets, also after an error or Ctrl-C. `--keep` leaves them running, but the deletion
 timer set at provisioning (`deadline_hours`, default 4) still deletes them.
 The individual steps:
 
@@ -88,12 +89,12 @@ The individual steps:
 ./gnosis_vpn-bench provision RUN     # asks first; costs money
 ./gnosis_vpn-bench fund RUN          # asks first; moves funds
 ./gnosis_vpn-bench connect RUN [--target NAME]
-./gnosis_vpn-bench ladder RUN [--target NAME]   # and/or: sweep RUN
+./gnosis_vpn-bench ladder RUN [--target NAME]   # and/or: sweep RUN; both push results
 ./gnosis_vpn-bench recover RUN       # asks first; returns funds
 ./gnosis_vpn-bench destroy RUN       # asks first; deletes this run's VMs
 ./gnosis_vpn-bench status RUN
 ./gnosis_vpn-bench report RUN
-./gnosis_vpn-bench results push RUN --dry-run
+./gnosis_vpn-bench results push RUN   # retry a push or combine runs; no prompt
 ```
 
 Profiles (`profiles/*.toml`) pin network, channel, package and worker

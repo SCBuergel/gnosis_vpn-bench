@@ -211,6 +211,8 @@ def cmd_ladder(args: argparse.Namespace) -> int:
         print(f"  rung {rung['rung']}: {value}")
     directory = steps.step_result(run, profile, target)
     print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
+    if not args.no_push:
+        auto_push(run)
     return 0
 
 
@@ -223,6 +225,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         print(f"  {row['exit_label']:<16} {row['status']:<22} {row['detail'] or ''}")
     directory = steps.step_result(run, profile, target)
     print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
+    if not args.no_push:
+        auto_push(run)
     return 0
 
 
@@ -276,7 +280,11 @@ def _results_repo(args: argparse.Namespace) -> Path | None:
 
 
 def _publish(args: argparse.Namespace, repo: Path, staged: list[Any], message: str) -> int:
-    """Scan, show, ask, write, index, commit, push. Shared by every results command."""
+    """Scan, show, write, index, commit, push. Shared by every results command.
+
+    Results go to the private repo without a prompt (``--ask`` adds one): the
+    scan, the allow-list and the private-repo check are the safeguards.
+    """
     from .results import publish, push
 
     staged = [*staged, publish.index_staged(repo, staged)]
@@ -293,7 +301,7 @@ def _publish(args: argparse.Namespace, repo: Path, staged: list[Any], message: s
         print("Dry run: nothing written, committed or pushed.")
         return 0
     remote = push.check_results_repo(repo)
-    if not confirm(f"Write these files in {repo}, commit and push to {remote}?", args.yes):
+    if getattr(args, "ask", False) and not confirm(f"Write these files in {repo}, commit and push to {remote}?", False):
         print("Nothing written, committed or pushed.")
         return 0
     written = publish.write(repo, staged)
@@ -303,6 +311,37 @@ def _publish(args: argparse.Namespace, repo: Path, staged: list[Any], message: s
     push.push(repo)
     print("Pushed.")
     return 0
+
+
+def _single_run_id(refs: list[str]) -> str | None:
+    """A single run's report is named after the run, so later pushes update it."""
+    if len(refs) != 1:
+        return None
+    try:
+        return open_run(refs[0], load_user_config()).config.id
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def auto_push(run: Run) -> bool:
+    """Publish the run's current results without asking. Never raises.
+
+    Called by ladder, sweep and execute as soon as results exist and again
+    before teardown. A failure is reported loudly but never stops the
+    caller, so teardown and the deletion timer are never blocked by it.
+    """
+    args = argparse.Namespace(
+        run=[str(run.path)], report_name=None, title=None, link=None, repo=None, dry_run=False, ask=False
+    )
+    print("Publishing results to the private results repo…")
+    try:
+        status = cmd_results_push(args)
+    except Exception as error:  # publishing must never block measurement teardown
+        print(f"RESULTS NOT PUSHED: {type(error).__name__}: {error}")
+        return False
+    if status != 0:
+        print(f"RESULTS NOT PUSHED (exit {status}); see above. Retry with: results push {run.config.id}")
+    return status == 0
 
 
 def cmd_results_push(args: argparse.Namespace) -> int:
@@ -320,9 +359,10 @@ def cmd_results_push(args: argparse.Namespace) -> int:
     directories = [directory for ref in args.run for directory in result_dirs(ref)]
     staged = [publish.stage_recording(directory) for directory in directories]
     recordings = [Recording(item.folder.split("/", 1)[1], json.loads(item.files["result.json"])) for item in staged]
-    links = dict(args.link or [])
+    name = args.report_name or _single_run_id(args.run)
     try:
-        staged.append(publish.stage_report(recordings, name=args.report_name, title=args.title, links=links))
+        links = {**(publish.existing_links(repo, name) if name else {}), **dict(args.link or [])}
+        staged.append(publish.stage_report(recordings, name=name, title=args.title, links=links))
     except ValueError as error:
         print(error)
         return 2
@@ -426,7 +466,7 @@ def _teardown(user: Any, run: Run, profile: Any) -> bool:
 
 
 def cmd_execute(args: argparse.Namespace) -> int:
-    """provision → fund → (connect → ladder) per target → recover → destroy."""
+    """provision → fund → (connect → ladder → push) per target → push → recover → destroy."""
     from .remote import provision as prov
     from .remote import steps
 
@@ -463,12 +503,15 @@ def cmd_execute(args: argparse.Namespace) -> int:
                 shown = f"{value:.2f} Mbit/s" if value is not None else f"not measured ({rung['failure_status']})"
                 print(f"  rung {rung['rung']}: {shown}")
             print(f"  wrote {steps.step_result(run, profile, target)}")
+            auto_push(run)
     except KeyboardInterrupt as error:
         failure = error
         print("Interrupted.")
     except Exception as error:
         failure = error
         print(f"FAILED: {type(error).__name__}: {error}")
+    if any((run.path / "results").glob("*/result.json")):
+        auto_push(run)  # final data, before any machine is touched by teardown
     torn_down = True
     if args.keep:
         print("Droplets kept as requested. Run `recover` and `destroy` when done.")
@@ -504,7 +547,8 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
     def common(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--repo", metavar="PATH", help="local checkout of the results repo (default: user config)")
         parser.add_argument("--dry-run", action="store_true", help="show files and scan result only")
-        parser.add_argument("--yes", action="store_true", help="write, commit and push without asking")
+        parser.add_argument("--ask", action="store_true", help="ask before writing, committing and pushing")
+        parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # the default since 2026-10-31
 
     p = results_sub.add_parser("push", help="add runs' recordings and one report over all of them, scan, commit, push")
     p.add_argument(
@@ -537,7 +581,13 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser(
         "execute",
-        help="provision, fund, connect + ladder for every target, then recover and destroy (default)",
+        help="provision, fund, connect + ladder per target, push results, then recover and destroy",
+        description=(
+            "Provision, fund, then for every target connect and run the ladder. Results are pushed to the "
+            "private results repo without asking, after each target and once more with all of the run's "
+            "results BEFORE recover and destroy. Teardown (recover funds, delete droplets) runs by default, "
+            "also after an error or Ctrl-C; a failed push is reported but never blocks it."
+        ),
     )
     p.add_argument("run", help="run id or directory")
     p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
@@ -563,6 +613,8 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
         p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
         if name == "sweep":
             p.add_argument("--exit", action="append", metavar="ADDRESS", help="only this exit (repeatable)")
+        if name in ("ladder", "sweep"):
+            p.add_argument("--no-push", action="store_true", help="do not publish the results automatically")
         if name in ("connect", "ladder"):
             p.add_argument("--target", help="which of the run's targets (default: the first)")
         p.set_defaults(run_func=func)

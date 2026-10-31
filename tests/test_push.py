@@ -228,3 +228,35 @@ def test_bad_report_name_is_a_clean_error(tmp_path, capsys):
     )
     assert runcli.cmd_results_push(args) == 2
     assert "invalid report name" in capsys.readouterr().out
+
+
+def test_push_does_not_ask_by_default_and_keeps_links(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from gvpn_bench import runcli
+
+    repo = git_repo(tmp_path / "results")
+    monkeypatch.setattr(push, "check_results_repo", lambda repo: "origin")
+    monkeypatch.setattr(push, "push", lambda repo: None)
+    monkeypatch.setattr(runcli, "confirm", lambda prompt, assume_yes: pytest.fail("must not ask"))
+    run_dir = tmp_path / "r"
+    run_dir.mkdir()
+    write_result(run_dir, sample_result())
+
+    def ns(**kw):
+        base = {"repo": str(repo), "run": [str(run_dir)], "dry_run": False, "ask": False, "title": None, "link": None}
+        return argparse.Namespace(**{**base, **kw})
+
+    link = [("Claude app", "https://claude.ai/artifact/x")]
+    assert runcli.cmd_results_push(ns(report_name="r1", link=link)) == 0
+    sample = sample_result()
+    sample["run"]["notes"] = "updated"
+    write_result(run_dir, sample)
+    assert runcli.cmd_results_push(ns(report_name="r1")) == 0
+    meta = json.loads((repo / "reports" / "r1" / "report.json").read_text())
+    assert meta["links"] == {"Claude app": "https://claude.ai/artifact/x"}
+    asked = []
+    monkeypatch.setattr(runcli, "confirm", lambda prompt, assume_yes: asked.append(prompt) or False)
+    assert runcli.cmd_results_push(ns(report_name="r1", ask=True)) == 0
+    assert asked
+    capsys.readouterr()
