@@ -79,13 +79,13 @@ def test_publish_writes_recording_report_and_index(tmp_path):
     member = Recording(recording.folder.split("/")[1], json.loads(recording.files["result.json"]))
     report = publish.stage_report([member], links={"Claude app": "https://claude.ai/artifact/x"})
     staged = [recording, report, publish.index_staged(repo, [recording, report])]
-    assert push.commit(repo, publish.write(repo, staged), "add")
+    assert push.commit(repo, publish.write(repo, staged), "add", update=publish.folders(staged))
     tracked = set(subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True).stdout.split())
     assert "README.md" in tracked
     assert f"{recording.folder}/README.md" in tracked and f"{report.folder}/report.json" in tracked
     index = (repo / "README.md").read_text()
     assert recording.folder in index and "Claude app" in index and "42.5 / n/a" in index
-    assert not push.commit(repo, publish.write(repo, staged), "again")
+    assert not push.commit(repo, publish.write(repo, staged), "again", update=publish.folders(staged))
     rebuilt = publish.rebuild_all(repo)
     assert {s.folder for s in rebuilt} == {recording.folder, report.folder}
 
@@ -174,9 +174,9 @@ def test_cli_push_two_locations_then_combine_and_link(tmp_path, monkeypatch, cap
 def test_commit_records_charts_dropped_by_a_rebuild(tmp_path):
     repo = git_repo(tmp_path / "results")
     first = publish.Staged("reports/r", {"README.md": "x", "charts/a.svg": "<svg/>", "charts/b.svg": "<svg/>"})
-    assert push.commit(repo, publish.write(repo, [first]), "one")
+    assert push.commit(repo, publish.write(repo, [first]), "one", update=publish.folders([first]))
     second = publish.Staged("reports/r", {"README.md": "y", "charts/a.svg": "<svg/>"})
-    assert push.commit(repo, publish.write(repo, [second]), "two")
+    assert push.commit(repo, publish.write(repo, [second]), "two", update=publish.folders([second]))
     tracked = subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True).stdout.split()
     assert "reports/r/charts/b.svg" not in tracked
     status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True)
@@ -201,3 +201,30 @@ def test_link_validates_name_and_url(tmp_path, capsys):
     assert runcli.cmd_results_link(ns("..", "https://a")) == 2
     assert runcli.cmd_results_link(ns("r", "http://a")) == 2
     capsys.readouterr()
+
+
+def test_untracked_files_in_a_report_folder_are_never_committed(tmp_path):
+    repo = git_repo(tmp_path / "results")
+    stray = repo / "runs" / "x" / "inventory.json"
+    stray.parent.mkdir(parents=True)
+    stray.write_text('[{"ip": "203.0.113.9"}]')
+    staged = publish.Staged("runs/x", {"README.md": "ok"})
+    assert publish.scan([staged]) == []
+    assert push.commit(repo, publish.write(repo, [staged]), "add", update=publish.folders([staged]))
+    tracked = subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True).stdout.split()
+    assert tracked == ["runs/x/README.md"]
+
+
+def test_bad_report_name_is_a_clean_error(tmp_path, capsys):
+    import argparse
+
+    from gvpn_bench import runcli
+
+    run_dir = tmp_path / "r"
+    run_dir.mkdir()
+    write_result(run_dir, sample_result())
+    args = argparse.Namespace(
+        repo=str(tmp_path), run=[str(run_dir)], report_name="..", title=None, link=None, dry_run=True, yes=False
+    )
+    assert runcli.cmd_results_push(args) == 2
+    assert "invalid report name" in capsys.readouterr().out

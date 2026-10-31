@@ -196,10 +196,11 @@ def scan(staged: list[Staged]) -> list[str]:
 
 
 def write(repo: Path, staged: list[Staged]) -> list[str]:
-    """Replace each staged folder's files; return the repo-relative paths to commit.
+    """Replace each staged folder's files; return the repo-relative files written.
 
-    Whole folders are returned (the root index as its file), so files the
-    regeneration dropped, such as old charts, are committed as deletions.
+    Commit these with ``push.commit(..., update=folders(staged))``: only these
+    files are added, and the folders are updated for deletions only (old
+    charts), so a stray untracked file in a folder is never committed.
     """
     written = []
     for item in staged:
@@ -211,11 +212,12 @@ def write(repo: Path, staged: list[Staged]) -> list[str]:
             target = folder / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text)
-            if not item.folder:
-                written.append(path)
-        if item.folder:
-            written.append(item.folder)
+            written.append(f"{item.folder}/{path}" if item.folder else path)
     return written
+
+
+def folders(staged: list[Staged]) -> list[str]:
+    return [item.folder for item in staged if item.folder]
 
 
 def rebuild_all(repo: Path) -> list[Staged]:

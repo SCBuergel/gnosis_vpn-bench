@@ -158,14 +158,17 @@ def check_results_repo(repo: Path) -> str:
     return remote
 
 
-def commit(repo: Path, paths: list[str], message: str) -> bool:
-    """Stage *paths* (files or folders, including deletions inside them) and commit.
+def commit(repo: Path, files: list[str], message: str, update: list[str] | None = None) -> bool:
+    """Add exactly *files*, record deletions of tracked files under *update*, commit.
 
-    Returns False if nothing changed.
+    ``git add -u`` never adds untracked files, so nothing that was not
+    generated and scanned can be committed. Returns False if nothing changed.
     """
     if git(repo, "diff", "--cached", "--name-only"):
         raise RuntimeError(f"{repo} already has staged changes; commit or unstage them first")
-    git(repo, "add", "-A", "--", *paths)
+    git(repo, "add", "--", *files)
+    if update:
+        git(repo, "add", "-u", "--", *update)
     if not git(repo, "diff", "--cached", "--name-only"):
         return False
     git(repo, "commit", "-m", message)

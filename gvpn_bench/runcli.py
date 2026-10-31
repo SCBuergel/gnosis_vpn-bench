@@ -296,8 +296,8 @@ def _publish(args: argparse.Namespace, repo: Path, staged: list[Any], message: s
     if not confirm(f"Write these files in {repo}, commit and push to {remote}?", args.yes):
         print("Nothing written, committed or pushed.")
         return 0
-    paths = publish.write(repo, staged)
-    if not push.commit(repo, paths, message):
+    written = publish.write(repo, staged)
+    if not push.commit(repo, written, message, update=publish.folders(staged)):
         print("Nothing changed; no commit, nothing pushed.")
         return 0
     push.push(repo)
@@ -321,7 +321,11 @@ def cmd_results_push(args: argparse.Namespace) -> int:
     staged = [publish.stage_recording(directory) for directory in directories]
     recordings = [Recording(item.folder.split("/", 1)[1], json.loads(item.files["result.json"])) for item in staged]
     links = dict(args.link or [])
-    staged.append(publish.stage_report(recordings, name=args.report_name, title=args.title, links=links))
+    try:
+        staged.append(publish.stage_report(recordings, name=args.report_name, title=args.title, links=links))
+    except ValueError as error:
+        print(error)
+        return 2
     return _publish(args, repo, staged, f"Add results {staged[-1].folder}")
 
 
@@ -338,7 +342,11 @@ def cmd_results_combine(args: argparse.Namespace) -> int:
         print(f"Not in {repo}/runs: {', '.join(missing)}")
         return 2
     members = [available[name] for name in args.recordings]
-    report = publish.stage_report(members, name=args.name, title=args.title, links=dict(args.link or []))
+    try:
+        report = publish.stage_report(members, name=args.name, title=args.title, links=dict(args.link or []))
+    except ValueError as error:
+        print(error)
+        return 2
     return _publish(args, repo, [report], f"Add report {report.folder}")
 
 
