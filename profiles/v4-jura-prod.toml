@@ -1,0 +1,11 @@
+description = "Stable 0.96.0 package (client 0.97.0) on jura-prod, root-owned worker"
+network = "jura-prod"
+
+[package]
+channel = "stable"
+version = "0.96.0"
+url = "https://download.vpn.gnosis.eth.limo/linux/apt/pool/main/g/gnosisvpn/gnosisvpn_0.96.0_amd64.deb"
+sha256 = "1ed6ba106b07056e49f8d6bde9790fd39de04bca9b410184083b9a7ad748e30b"
+
+[worker]
+model = "v4-root"

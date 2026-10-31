@@ -1,0 +1,12 @@
+description = "Experimental channel on piz-palu-prod, per-user worker. NOT PINNED: provisioning refuses until version, url and sha256 are filled in."
+network = "piz-palu-prod"
+
+[package]
+channel = "experimental"
+# version = ""
+# url = ""
+# sha256 = ""
+
+[worker]
+model = "v5-user"
+user = "gvpnbench"

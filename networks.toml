@@ -1,0 +1,11 @@
+# HOPR networks a Gnosis VPN client can join. Profiles and targets refer
+# to these names; a run refuses a profile and target on different networks.
+
+[jura-prod]
+indexer = "https://blokli.jura.gnosisvpn.io"
+
+[piz-palu-prod]
+indexer = "https://blokli.piz-palu.gnosisvpn.io"
+
+[piz-palu-dev]
+indexer = "https://blokli.piz-palu.dev.gnosisvpn.io"

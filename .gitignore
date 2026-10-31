@@ -10,3 +10,8 @@ venv/
 dist/
 build/
 /tmp/gnosis_upload_*.bin
+.pytest_cache/
+.ruff_cache/
+# Run directories hold SSH keys, inventories and payment state. They live
+# outside the repo by default; never commit one if you point --runs-dir here.
+runs/

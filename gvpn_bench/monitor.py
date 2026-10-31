@@ -32,6 +32,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .host import RC_NOT_FOUND
 
 log = logging.getLogger("gnosis_speedtest")
 
@@ -53,31 +54,27 @@ OUTPUT_DIR = SCRIPT_DIR / "output"
 # Recording defaults
 # ---------------------------------------------------------------------------
 #
-# Default output paths embed a process-start timestamp ("ping--YYYY-MM-DD
+# Default output paths embed the session timestamp ("ping--YYYY-MM-DD
 # --HH-MM-SS.txt") so re-running a recorder never silently overwrites the
-# previous session's data. The timestamp is computed once at import time
-# so every default produced in one invocation shares it — handy for
-# `ping-load`, where the ping recording and the speed file should carry
-# the same session stamp.
-
-_RUN_TS = datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
+# previous session's data. The CLI computes the stamp once per invocation
+# so, in `ping-load`, the ping recording and the speed file share it.
 
 DEFAULT_PING_HOST = "google.com"
-DEFAULT_CURL_URL = (
-    "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.0.5.tar.xz"
-)
-DEFAULT_PING_FILE = str(DATA_DIR / f"ping--{_RUN_TS}.txt")
-DEFAULT_CURL_FILE = str(DATA_DIR / f"curl--{_RUN_TS}.txt")
+DEFAULT_CURL_URL = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.0.5.tar.xz"
 
 # ping-load: speed--TS.txt is the shared, append-only file that
 # accumulates every curl burst's progress meter; pingload's curl URL
 # defaults to Cloudflare's 10 MB anycast endpoint so the bench's existing
 # downstream tooling agrees on the payload size.
-DEFAULT_SPEED_FILE = str(DATA_DIR / f"speed--{_RUN_TS}.txt")
+
+
+def default_recording_path(kind, stamp):
+    """``data/<kind>--<stamp>.txt`` for kind in ping, curl, speed."""
+    return str(DATA_DIR / f"{kind}--{stamp}.txt")
+
+
 DEFAULT_PING_LOAD_INTERVAL_MIN = 30
-DEFAULT_PING_LOAD_CURL_URL = (
-    "https://speed.cloudflare.com/__down?bytes=10485760"  # 10 MB
-)
+DEFAULT_PING_LOAD_CURL_URL = "https://speed.cloudflare.com/__down?bytes=10485760"  # 10 MB
 
 # ---------------------------------------------------------------------------
 # Box-plot defaults
@@ -108,10 +105,10 @@ CURL_SPEED_RE = re.compile(r"^(\d+(?:\.\d+)?)([kMG]?)$")
 # multiplying by 8 only at format time worked, but it made log-y
 # decades land at 8/80/800… instead of the expected 10/100/1000.)
 SPEED_UNIT_BITS = {
-    "":  8,
+    "": 8,
     "k": 8 * 1024,
-    "M": 8 * 1024 ** 2,
-    "G": 8 * 1024 ** 3,
+    "M": 8 * 1024**2,
+    "G": 8 * 1024**3,
 }
 
 
@@ -142,7 +139,7 @@ def parse_recording(path):
             if not ts_match:
                 continue
             t = float(ts_match.group(1))
-            rest = line[ts_match.end():]
+            rest = line[ts_match.end() :]
 
             ping_match = PING_TIME_RE.search(rest)
             if ping_match:
@@ -173,6 +170,7 @@ def parse_recording(path):
 # the timestamps. If a future mode emits back-to-back bursts with no
 # idle gap, this function would fuse them; raise the gap threshold or
 # add banner-detection then.
+
 
 def segment_bursts(points, gap_seconds, min_samples):
     """Group sample points into bursts separated by ``gap_seconds`` of silence.
@@ -244,15 +242,11 @@ def summarize_burst(samples, outlier_sigma=DEFAULT_BOX_OUTLIER_SIGMA):
     # promoted by the shrinking-σ feedback loop).
     median_pre = _quantile(vs_all_sorted, 0.5)
     mean_pre = sum(vs_all_sorted) / n_all
-    sigma_pre = math.sqrt(
-        sum((v - mean_pre) ** 2 for v in vs_all_sorted) / n_all
-    )
+    sigma_pre = math.sqrt(sum((v - mean_pre) ** 2 for v in vs_all_sorted) / n_all)
     threshold = outlier_sigma * sigma_pre
 
-    inliers = [(t, v) for (t, v) in samples
-               if abs(v - median_pre) <= threshold]
-    outliers = [(t, v) for (t, v) in samples
-                if abs(v - median_pre) > threshold]
+    inliers = [(t, v) for (t, v) in samples if abs(v - median_pre) <= threshold]
+    outliers = [(t, v) for (t, v) in samples if abs(v - median_pre) > threshold]
     # By construction at least one sample (the one closest to the
     # median) survives the threshold check, so inliers is never empty —
     # even for the σ=0 edge case (all values identical, threshold=0,
@@ -286,6 +280,7 @@ def summarize_burst(samples, outlier_sigma=DEFAULT_BOX_OUTLIER_SIGMA):
 # ---------------------------------------------------------------------------
 # Value formatting
 # ---------------------------------------------------------------------------
+
 
 def format_ms(v):
     if v == 0:
@@ -333,39 +328,39 @@ KIND_FORMATTER = {"ping": format_ms, "curl": format_bits_per_second}
 # `k` and `w` have no shade ladder.
 COLOR_MAP = {
     # blue family — OKLCH H≈265°
-    "b":  "blue",            # bare: pure blue (#0000ff, original)
-    "b1": "#8BB5FF",         # light  L=0.77 C=0.12 (gamut-clipped from 0.14)
-    "b2": "#5176CD",         # mid    L=0.58 C=0.14
-    "b3": "#1C3A8B",         # dark   L=0.38 C=0.14
+    "b": "blue",  # bare: pure blue (#0000ff, original)
+    "b1": "#8BB5FF",  # light  L=0.77 C=0.12 (gamut-clipped from 0.14)
+    "b2": "#5176CD",  # mid    L=0.58 C=0.14
+    "b3": "#1C3A8B",  # dark   L=0.38 C=0.14
     # green family — OKLCH H≈155°
-    "g":  "green",           # bare: pure green (#008000, original)
-    "g1": "#63D18F",         # light  L=0.78 C=0.14
-    "g2": "#0E9254",         # mid    L=0.58 C=0.14
-    "g3": "#00561C",         # dark   L=0.40 C=0.12 (gamut-clipped, H drifts to 147°)
+    "g": "green",  # bare: pure green (#008000, original)
+    "g1": "#63D18F",  # light  L=0.78 C=0.14
+    "g2": "#0E9254",  # mid    L=0.58 C=0.14
+    "g3": "#00561C",  # dark   L=0.40 C=0.12 (gamut-clipped, H drifts to 147°)
     # red family — OKLCH H≈25°
-    "r":  "red",             # bare: pure red (#ff0000, original)
-    "r1": "#FF9189",         # light  L=0.77 C=0.13
-    "r2": "#BF534E",         # mid    L=0.58 C=0.14
-    "r3": "#7C1117",         # dark   L=0.38 C=0.14
+    "r": "red",  # bare: pure red (#ff0000, original)
+    "r1": "#FF9189",  # light  L=0.77 C=0.13
+    "r2": "#BF534E",  # mid    L=0.58 C=0.14
+    "r3": "#7C1117",  # dark   L=0.38 C=0.14
     # cyan family — OKLCH H≈200°
-    "c":  "cyan",            # bare: pure cyan (#00ffff, original)
-    "c1": "#00D1DA",         # light  L=0.78 C=0.13
-    "c2": "#00919B",         # mid    L=0.60 C=0.10 (gamut-clipped)
-    "c3": "#00555F",         # dark   L=0.41 C=0.07 (gamut-clipped; reads muted)
+    "c": "cyan",  # bare: pure cyan (#00ffff, original)
+    "c1": "#00D1DA",  # light  L=0.78 C=0.13
+    "c2": "#00919B",  # mid    L=0.60 C=0.10 (gamut-clipped)
+    "c3": "#00555F",  # dark   L=0.41 C=0.07 (gamut-clipped; reads muted)
     # purple/magenta family — OKLCH H≈325°
-    "m":  "magenta",         # bare: pure magenta (#ff00ff, original)
-    "m1": "#E497E8",         # light  L=0.78 C=0.14
-    "m2": "#A35AA7",         # mid    L=0.58 C=0.14
-    "m3": "#651E6A",         # dark   L=0.38 C=0.14
+    "m": "magenta",  # bare: pure magenta (#ff00ff, original)
+    "m1": "#E497E8",  # light  L=0.78 C=0.14
+    "m2": "#A35AA7",  # mid    L=0.58 C=0.14
+    "m3": "#651E6A",  # dark   L=0.38 C=0.14
     # yellow family — OKLCH H≈95°
-    "y":  "olive",           # bare: olive (#808000, original — pure
-                             # yellow is unreadable on white)
-    "y1": "#D3B63B",         # light  L=0.78 C=0.14
-    "y2": "#957700",         # mid    L=0.58 C=0.12 (gamut-clipped)
-    "y3": "#5A3E00",         # dark   L=0.39 C=0.08 (gamut-clipped; reads muted)
+    "y": "olive",  # bare: olive (#808000, original — pure
+    # yellow is unreadable on white)
+    "y1": "#D3B63B",  # light  L=0.78 C=0.14
+    "y2": "#957700",  # mid    L=0.58 C=0.12 (gamut-clipped)
+    "y3": "#5A3E00",  # dark   L=0.39 C=0.08 (gamut-clipped; reads muted)
     # neutrals — no shade ladder
-    "k":  "black",
-    "w":  "white",
+    "k": "black",
+    "w": "white",
 }
 
 # Letters that may take a digit suffix to select a shade. `k` and `w`
@@ -373,10 +368,10 @@ COLOR_MAP = {
 SHADED_COLOR_LETTERS = set("brgcmy")
 
 LINESTYLE_DASH = {
-    "-":  None,
+    "-": None,
     "--": "12,6",
     "-.": "10,5,2,5",
-    ":":  "0,6",
+    ":": "0,6",
 }
 
 MARKER_DEFS = {
@@ -392,8 +387,14 @@ MARKER_DEFS = {
 }
 
 MARKER_HREFS = {
-    ".": "#m-dot",     "o": "#m-circle",    "x": "#m-x",      "+": "#m-plus",
-    "s": "#m-square",  "D": "#m-diamond",   "^": "#m-tri-up", "v": "#m-tri-down",
+    ".": "#m-dot",
+    "o": "#m-circle",
+    "x": "#m-x",
+    "+": "#m-plus",
+    "s": "#m-square",
+    "D": "#m-diamond",
+    "^": "#m-tri-up",
+    "v": "#m-tri-down",
     "*": "#m-star",
 }
 
@@ -401,11 +402,7 @@ DEFAULT_COLOR_CODE = "b"
 
 
 def _xml_escape(s):
-    return (
-        s.replace("&", "&amp;")
-         .replace("<", "&lt;")
-         .replace(">", "&gt;")
-    )
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def parse_style(spec):
@@ -421,10 +418,10 @@ def parse_style(spec):
     i = 0
     while i < len(spec):
         # Two-char linestyles checked first so "--" doesn't lose its first "-".
-        if spec[i:i + 2] in ("--", "-."):
+        if spec[i : i + 2] in ("--", "-."):
             if linestyle is not None:
                 raise ValueError(f"duplicate linestyle in style {spec!r}")
-            linestyle = spec[i:i + 2]
+            linestyle = spec[i : i + 2]
             i += 2
             continue
         ch = spec[i]
@@ -443,10 +440,8 @@ def parse_style(spec):
         if ch in COLOR_MAP:
             if color is not None:
                 raise ValueError(f"duplicate colour in style {spec!r}")
-            two = spec[i:i + 2]
-            if (ch in SHADED_COLOR_LETTERS
-                    and len(two) == 2
-                    and two in COLOR_MAP):
+            two = spec[i : i + 2]
+            if ch in SHADED_COLOR_LETTERS and len(two) == 2 and two in COLOR_MAP:
                 color = two
                 i += 2
             else:
@@ -466,6 +461,7 @@ def parse_style(spec):
 # ---------------------------------------------------------------------------
 # Tick generation
 # ---------------------------------------------------------------------------
+
 
 def nice_step(raw):
     if raw <= 0:
@@ -494,11 +490,30 @@ def linear_ticks(lo, hi, n=5):
 
 
 TIME_TICK_STEPS = [
-    1, 2, 5, 10, 15, 30,
-    60, 2 * 60, 5 * 60, 10 * 60, 15 * 60, 30 * 60,
-    3600, 2 * 3600, 3 * 3600, 6 * 3600, 12 * 3600,
-    86400, 2 * 86400, 7 * 86400, 14 * 86400, 28 * 86400,
-    90 * 86400, 365 * 86400,
+    1,
+    2,
+    5,
+    10,
+    15,
+    30,
+    60,
+    2 * 60,
+    5 * 60,
+    10 * 60,
+    15 * 60,
+    30 * 60,
+    3600,
+    2 * 3600,
+    3 * 3600,
+    6 * 3600,
+    12 * 3600,
+    86400,
+    2 * 86400,
+    7 * 86400,
+    14 * 86400,
+    28 * 86400,
+    90 * 86400,
+    365 * 86400,
 ]
 
 
@@ -507,9 +522,7 @@ def time_ticks(t0, t1, n=5):
         return [t0]
     raw = (t1 - t0) / n
     step = next((s for s in TIME_TICK_STEPS if s >= raw), TIME_TICK_STEPS[-1])
-    origin = datetime.fromtimestamp(t0).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ).timestamp()
+    origin = datetime.fromtimestamp(t0).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     out = []
     k = math.ceil((t0 - origin) / step - 1e-9)
     v = origin + k * step
@@ -526,7 +539,7 @@ def log_decade_ticks(lo, hi):
     hi_e = math.floor(math.log10(hi) + 1e-9)
     if hi_e < lo_e:
         return []
-    return [10 ** e for e in range(lo_e, hi_e + 1)]
+    return [10**e for e in range(lo_e, hi_e + 1)]
 
 
 def log_minor_ticks(lo, hi):
@@ -536,7 +549,7 @@ def log_minor_ticks(lo, hi):
     hi_e = math.ceil(math.log10(hi))
     out = []
     for e in range(lo_e, hi_e + 1):
-        base = 10 ** e
+        base = 10**e
         for m in range(2, 10):
             v = m * base
             if lo <= v <= hi:
@@ -547,6 +560,7 @@ def log_minor_ticks(lo, hi):
 # ---------------------------------------------------------------------------
 # Axes
 # ---------------------------------------------------------------------------
+
 
 class Axis:
     _MINOR_TICK_DECADE_LIMIT = 4
@@ -650,14 +664,11 @@ def default_styles_for_axes(n_left, n_right):
     if n_right == 0:
         if n_left == 1:
             return ["xb"]
-        return [DEFAULT_SINGLE_AXIS_STYLES[i % len(DEFAULT_SINGLE_AXIS_STYLES)]
-                for i in range(n_left)]
+        return [DEFAULT_SINGLE_AXIS_STYLES[i % len(DEFAULT_SINGLE_AXIS_STYLES)] for i in range(n_left)]
     if n_left == 1 and n_right == 1:
         return ["xb", "xr"]
-    left = [f"x{LEFT_AXIS_COLOR_CYCLE[i % len(LEFT_AXIS_COLOR_CYCLE)]}"
-            for i in range(n_left)]
-    right = [f"x{RIGHT_AXIS_COLOR_CYCLE[i % len(RIGHT_AXIS_COLOR_CYCLE)]}"
-             for i in range(n_right)]
+    left = [f"x{LEFT_AXIS_COLOR_CYCLE[i % len(LEFT_AXIS_COLOR_CYCLE)]}" for i in range(n_left)]
+    right = [f"x{RIGHT_AXIS_COLOR_CYCLE[i % len(RIGHT_AXIS_COLOR_CYCLE)]}" for i in range(n_right)]
     return left + right
 
 
@@ -669,13 +680,12 @@ class Series:
     from — points are still used for axis-range determination and for
     the optional sample-underlay when ``--box-show-dots`` is set.
     """
-    __slots__ = ("kind", "points", "mode", "bursts")
+
+    __slots__ = ("bursts", "kind", "mode", "points")
 
     def __init__(self, kind, points, mode="dots", bursts=None):
         if mode not in ("dots", "boxes"):
-            raise ValueError(
-                f"Series mode must be 'dots' or 'boxes', got {mode!r}"
-            )
+            raise ValueError(f"Series mode must be 'dots' or 'boxes', got {mode!r}")
         if mode == "boxes" and bursts is None:
             raise ValueError("Series(mode='boxes') requires bursts")
         self.kind = kind
@@ -746,34 +756,27 @@ class Plot:
         prev_date = None
         for t, d in zip(ticks, dates):
             px = self.x_pixel(t)
-            out.append(
-                f'<line x1="{px}" y1="{bottom}" x2="{px}" y2="{bottom + 4}" '
-                f'stroke="black"/>'
-            )
+            out.append(f'<line x1="{px}" y1="{bottom}" x2="{px}" y2="{bottom + 4}" stroke="black"/>')
             dt = datetime.fromtimestamp(t)
             if time_fmt is None:
                 out.append(
-                    f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">'
-                    f'{dt.strftime("%Y-%m-%d")}</text>'
+                    f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">{dt.strftime("%Y-%m-%d")}</text>'
                 )
             else:
                 out.append(
-                    f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">'
-                    f'{dt.strftime(time_fmt)}</text>'
+                    f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">{dt.strftime(time_fmt)}</text>'
                 )
                 if show_date_row and d != prev_date:
                     out.append(
                         f'<text x="{px}" y="{bottom + 18 + FONT_SIZE + 2}" '
                         f'text-anchor="middle" fill="#666">'
-                        f'{dt.strftime("%Y-%m-%d")}</text>'
+                        f"{dt.strftime('%Y-%m-%d')}</text>"
                     )
             prev_date = d
 
         if not show_date_row:
             cx = (MARGIN_LEFT + self.width - MARGIN_RIGHT) / 2
-            out.append(
-                f'<text x="{cx}" y="{self.height - 10}" text-anchor="middle">Time</text>'
-            )
+            out.append(f'<text x="{cx}" y="{self.height - 10}" text-anchor="middle">Time</text>')
         return out
 
     def y_axis(self, axis, side, color):
@@ -784,35 +787,21 @@ class Plot:
         for v in axis.minor_ticks():
             py = self.y_pixel(v, axis)
             if side == "left":
-                out.append(
-                    f'<line x1="{left - 2}" y1="{py}" x2="{left}" y2="{py}" '
-                    f'stroke="{color}"/>'
-                )
+                out.append(f'<line x1="{left - 2}" y1="{py}" x2="{left}" y2="{py}" stroke="{color}"/>')
             else:
-                out.append(
-                    f'<line x1="{right}" y1="{py}" x2="{right + 2}" y2="{py}" '
-                    f'stroke="{color}"/>'
-                )
+                out.append(f'<line x1="{right}" y1="{py}" x2="{right + 2}" y2="{py}" stroke="{color}"/>')
 
         for v in axis.major_ticks():
             py = self.y_pixel(v, axis)
             if side == "left":
-                out.append(
-                    f'<line x1="{left - 4}" y1="{py}" x2="{left}" y2="{py}" '
-                    f'stroke="{color}"/>'
-                )
-                out.append(
-                    f'<line x1="{left}" y1="{py}" x2="{right}" y2="{py}" stroke="#eee"/>'
-                )
+                out.append(f'<line x1="{left - 4}" y1="{py}" x2="{left}" y2="{py}" stroke="{color}"/>')
+                out.append(f'<line x1="{left}" y1="{py}" x2="{right}" y2="{py}" stroke="#eee"/>')
                 out.append(
                     f'<text x="{left - 6}" y="{py + 4}" text-anchor="end" '
                     f'fill="{color}">{axis.format(v)}</text>'
                 )
             else:
-                out.append(
-                    f'<line x1="{right}" y1="{py}" x2="{right + 4}" y2="{py}" '
-                    f'stroke="{color}"/>'
-                )
+                out.append(f'<line x1="{right}" y1="{py}" x2="{right + 4}" y2="{py}" stroke="{color}"/>')
                 out.append(
                     f'<text x="{right + 6}" y="{py + 4}" text-anchor="start" '
                     f'fill="{color}">{axis.format(v)}</text>'
@@ -844,6 +833,7 @@ class Plot:
         def _approx_width(s):
             spaces = s.count(" ")
             return ((len(s) - spaces) * 0.7 + spaces * 0.3) * FONT_SIZE
+
         text_w = max(_approx_width(lbl) for lbl, *_ in entries)
         box_w = sample_w + text_w + pad * 3
         box_h = len(entries) * line_h + pad
@@ -879,31 +869,33 @@ class Plot:
                     f'stroke="{color}" stroke-width="1.5"/>'
                 )
                 out.append(
-                    f'<line x1="{mx-half:.1f}" y1="{top_y:.1f}" '
-                    f'x2="{mx+half:.1f}" y2="{top_y:.1f}" '
+                    f'<line x1="{mx - half:.1f}" y1="{top_y:.1f}" '
+                    f'x2="{mx + half:.1f}" y2="{top_y:.1f}" '
                     f'stroke="{color}" stroke-width="1.5"/>'
                 )
                 out.append(
-                    f'<line x1="{mx-half:.1f}" y1="{bot_y:.1f}" '
-                    f'x2="{mx+half:.1f}" y2="{bot_y:.1f}" '
+                    f'<line x1="{mx - half:.1f}" y1="{bot_y:.1f}" '
+                    f'x2="{mx + half:.1f}" y2="{bot_y:.1f}" '
                     f'stroke="{color}" stroke-width="1.5"/>'
                 )
                 out.append(
-                    f'<rect x="{mx-half:.1f}" y="{body_top:.1f}" '
-                    f'width="{2*half:.1f}" height="{(body_bot-body_top):.1f}" '
+                    f'<rect x="{mx - half:.1f}" y="{body_top:.1f}" '
+                    f'width="{2 * half:.1f}" height="{(body_bot - body_top):.1f}" '
                     f'fill="{color}" fill-opacity="0.25" '
                     f'stroke="{color}" stroke-width="1.5"/>'
                 )
                 out.append(
-                    f'<line x1="{mx-half:.1f}" y1="{cy:.1f}" '
-                    f'x2="{mx+half:.1f}" y2="{cy:.1f}" '
+                    f'<line x1="{mx - half:.1f}" y1="{cy:.1f}" '
+                    f'x2="{mx + half:.1f}" y2="{cy:.1f}" '
                     f'stroke="{color}" stroke-width="2"/>'
                 )
             else:
                 if linestyle is not None:
                     attrs = [
-                        f'x1="{sample_x0:.1f}"', f'y1="{cy:.1f}"',
-                        f'x2="{sample_x1:.1f}"', f'y2="{cy:.1f}"',
+                        f'x1="{sample_x0:.1f}"',
+                        f'y1="{cy:.1f}"',
+                        f'x2="{sample_x1:.1f}"',
+                        f'y2="{cy:.1f}"',
                         f'stroke="{color}"',
                         f'stroke-width="{STROKE_WIDTH}"',
                         'stroke-linecap="round"',
@@ -911,12 +903,11 @@ class Plot:
                     dash = LINESTYLE_DASH[linestyle]
                     if dash:
                         attrs.append(f'stroke-dasharray="{dash}"')
-                    out.append(f'<line {" ".join(attrs)}/>')
+                    out.append(f"<line {' '.join(attrs)}/>")
                 if marker is not None:
                     mx = (sample_x0 + sample_x1) / 2
                     out.append(
-                        f'<use href="{MARKER_HREFS[marker]}" '
-                        f'x="{mx:.1f}" y="{cy:.1f}" color="{color}"/>'
+                        f'<use href="{MARKER_HREFS[marker]}" x="{mx:.1f}" y="{cy:.1f}" color="{color}"/>'
                     )
             out.append(
                 f'<text x="{sample_x1 + pad:.1f}" y="{cy + FONT_SIZE * 0.35:.1f}" '
@@ -945,21 +936,18 @@ class Plot:
             dash = LINESTYLE_DASH[linestyle]
             if dash:
                 attrs.append(f'stroke-dasharray="{dash}"')
-            out.append(f'<path {" ".join(attrs)}/>')
+            out.append(f"<path {' '.join(attrs)}/>")
 
         if marker is not None:
             href = MARKER_HREFS[marker]
             for px, py in coords:
-                out.append(
-                    f'<use href="{href}" x="{px:.1f}" y="{py:.1f}" '
-                    f'color="{color}"/>'
-                )
+                out.append(f'<use href="{href}" x="{px:.1f}" y="{py:.1f}" color="{color}"/>')
 
         return out
 
-    def boxes(self, bursts, axis, color, kind,
-              width_px=DEFAULT_BOX_WIDTH_PX,
-              show_dots=False, show_labels=False):
+    def boxes(
+        self, bursts, axis, color, kind, width_px=DEFAULT_BOX_WIDTH_PX, show_dots=False, show_labels=False
+    ):
         """Draw one box per burst at ``b["t_center"]`` on the value axis.
 
         Anatomy per box (standard Tukey shape):
@@ -1069,25 +1057,29 @@ class Plot:
                 label_x = x_right + 4
                 label_y = y_top + label_font
                 out.append(
-                    f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
-                    f'font-size="{label_font:.1f}" fill="{color}">'
+                    f'<text x="{label_x:.1f}" y="{label_y:.1f}" font-size="{label_font:.1f}" fill="{color}">'
                 )
                 for i, ln in enumerate(lines):
                     dy = "0" if i == 0 else f"{label_line_h:.1f}"
-                    out.append(
-                        f'<tspan x="{label_x:.1f}" dy="{dy}">'
-                        f'{_xml_escape(ln)}</tspan>'
-                    )
-                out.append('</text>')
+                    out.append(f'<tspan x="{label_x:.1f}" dy="{dy}">{_xml_escape(ln)}</tspan>')
+                out.append("</text>")
 
         return out
 
 
-def render(left_series, right_series, log_y=False,
-           width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT,
-           styles=None, labels=None, title=None,
-           box_width_px=DEFAULT_BOX_WIDTH_PX,
-           box_show_dots=False, box_show_labels=False):
+def render(
+    left_series,
+    right_series,
+    log_y=False,
+    width=DEFAULT_WIDTH,
+    height=DEFAULT_HEIGHT,
+    styles=None,
+    labels=None,
+    title=None,
+    box_width_px=DEFAULT_BOX_WIDTH_PX,
+    box_show_dots=False,
+    box_show_labels=False,
+):
     """Render N left-axis + M right-axis series into a complete SVG.
 
     ``left_series`` and ``right_series`` are each a list of ``Series``
@@ -1130,10 +1122,7 @@ def render(left_series, right_series, log_y=False,
     all_series = left_series + right_series
     if styles is None:
         styles = default_styles_for_axes(n_left, n_right)
-    parsed = [
-        parse_style(styles[min(i, len(styles) - 1)])
-        for i in range(len(all_series))
-    ]
+    parsed = [parse_style(styles[min(i, len(styles) - 1)]) for i in range(len(all_series))]
     left_parsed = parsed[:n_left]
     right_parsed = parsed[n_left:]
 
@@ -1169,15 +1158,21 @@ def render(left_series, right_series, log_y=False,
         for s, (linestyle, marker, color) in zip(side_series, side_parsed):
             if s.mode == "boxes":
                 lines += plot.boxes(
-                    s.bursts, axis, color=color, kind=s.kind,
+                    s.bursts,
+                    axis,
+                    color=color,
+                    kind=s.kind,
                     width_px=box_width_px,
                     show_dots=box_show_dots,
                     show_labels=box_show_labels,
                 )
             else:
                 lines += plot.series(
-                    s.points, axis, color=color,
-                    linestyle=linestyle, marker=marker,
+                    s.points,
+                    axis,
+                    color=color,
+                    linestyle=linestyle,
+                    marker=marker,
                 )
         return axis_color, lines
 
@@ -1196,9 +1191,7 @@ def render(left_series, right_series, log_y=False,
 
     if labels:
         if len(labels) != len(all_series):
-            raise ValueError(
-                f"got {len(labels)} legend labels for {len(all_series)} series"
-            )
+            raise ValueError(f"got {len(labels)} legend labels for {len(all_series)} series")
         entries = [
             (labels[i], parsed[i][2], parsed[i][0], parsed[i][1], all_series[i].mode)
             for i in range(len(all_series))
@@ -1212,7 +1205,7 @@ def render(left_series, right_series, log_y=False,
         out.append(
             f'<text x="{plot.width / 2:.1f}" y="{FONT_SIZE + 4}" '
             f'text-anchor="middle" fill="black">'
-            f'{_xml_escape(title)}</text>'
+            f"{_xml_escape(title)}</text>"
         )
 
     out += plot.footer()
@@ -1229,10 +1222,14 @@ SVG_TO_PNG_TOOLS = [
     ["rsvg-convert", "-w", "{w}", "-h", "{h}", "-o", "{png}", "{svg}"],
     ["magick", "{svg}", "-resize", "{w}x{h}", "{png}"],
     ["convert", "{svg}", "-resize", "{w}x{h}", "{png}"],
-    ["inkscape", "{svg}",
-     "--export-type=png",
-     "--export-width={w}", "--export-height={h}",
-     "--export-filename={png}"],
+    [
+        "inkscape",
+        "{svg}",
+        "--export-type=png",
+        "--export-width={w}",
+        "--export-height={h}",
+        "--export-filename={png}",
+    ],
 ]
 
 
@@ -1250,14 +1247,13 @@ def svg_to_png(svg_path, svg_width, svg_height, scale=1.0):
     for template in SVG_TO_PNG_TOOLS:
         if not shutil.which(template[0]):
             continue
-        cmd = [
-            arg.format(svg=svg_path, png=png_path, w=w, h=h)
-            for arg in template
-        ]
+        cmd = [arg.format(svg=svg_path, png=png_path, w=w, h=h) for arg in template]
         try:
             subprocess.run(
-                cmd, check=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             return png_path
         except subprocess.CalledProcessError:
@@ -1268,6 +1264,7 @@ def svg_to_png(svg_path, svg_width, svg_height, scale=1.0):
 # ---------------------------------------------------------------------------
 # Recording
 # ---------------------------------------------------------------------------
+
 
 def _open_sinks(output_path, mode="w"):
     if not output_path:
@@ -1288,7 +1285,7 @@ def _emit(sinks, line):
 PING_INTERVAL_SECONDS = 1.0
 
 
-def record_ping(host, output_path, stop_event=None):
+def record_ping(runner, target, output_path, stop_event=None):
     """Send one ping per second, recording each reply with its timestamp.
 
     A spinning fresh `ping -c 1 -D <host>` per probe (rather than one
@@ -1298,18 +1295,17 @@ def record_ping(host, output_path, stop_event=None):
     If ``stop_event`` is passed, the loop exits cleanly when it's set —
     used by ping-load mode to coordinate shutdown from the main thread.
     """
-    cmd = ["ping", "-c", "1", "-W", "1", "-D", host]
+    cmd = ["ping", "-c", "1", "-W", "1", "-D", target]
     sinks, fh = _open_sinks(output_path, mode="w")
     try:
         while True:
             if stop_event is not None and stop_event.is_set():
                 break
             t0 = time.monotonic()
-            try:
-                proc = subprocess.run(cmd, capture_output=True, text=True)
-            except FileNotFoundError as e:
-                sys.exit(str(e))
-            for line in proc.stdout.splitlines():
+            result = runner.run(cmd, timeout_s=10)
+            if result.returncode == RC_NOT_FOUND:
+                sys.exit("ping not found")
+            for line in result.stdout.splitlines():
                 if TIMESTAMP_RE.search(line):
                     _emit(sinks, line + "\n")
             sleep_for = PING_INTERVAL_SECONDS - (time.monotonic() - t0)
@@ -1327,7 +1323,7 @@ def record_ping(host, output_path, stop_event=None):
     return 0
 
 
-def _stream_curl(url, sinks):
+def _stream_curl(runner, url, sinks):
     """Run curl once, fanning each \\r/\\n-delimited progress segment out
     to ``sinks`` with a high-resolution Unix timestamp prefix.
 
@@ -1336,12 +1332,7 @@ def _stream_curl(url, sinks):
     update instead of a single final blob.
     """
     cmd = ["curl", "-o", "/dev/null", url]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        bufsize=0,
-    )
+    proc = runner.popen(cmd, merge_stderr=True)
     buf = bytearray()
     try:
         while True:
@@ -1363,17 +1354,17 @@ def _stream_curl(url, sinks):
     return proc.returncode
 
 
-def record_curl(url, output_path):
+def record_curl(runner, url, output_path):
     """One curl run, truncating ``output_path`` (the standalone behaviour)."""
     sinks, fh = _open_sinks(output_path, mode="w")
     try:
-        return _stream_curl(url, sinks)
+        return _stream_curl(runner, url, sinks)
     finally:
         if fh is not None:
             fh.close()
 
 
-def record_curl_burst(url, output_path):
+def record_curl_burst(runner, url, output_path):
     """One curl run, appending to ``output_path`` (used by ping-load).
 
     Append mode means multiple bursts accumulate in one file without any
@@ -1382,7 +1373,7 @@ def record_curl_burst(url, output_path):
     """
     sinks, fh = _open_sinks(output_path, mode="a")
     try:
-        return _stream_curl(url, sinks)
+        return _stream_curl(runner, url, sinks)
     finally:
         if fh is not None:
             fh.close()
@@ -1397,7 +1388,8 @@ def _stamp(buf):
 # CLI entry points
 # ---------------------------------------------------------------------------
 
-def cmd_plot(args):
+
+def cmd_plot(bench, args):
     # Positionals default to the left axis (the common case: one or more
     # same-kind recordings stack on one y-scale). --left appends more,
     # --right opens a second y-axis; both can repeat. --boxes lands on
@@ -1408,8 +1400,7 @@ def cmd_plot(args):
     box_paths = list(args.boxes or [])
 
     if not left_paths and not right_paths and not box_paths:
-        sys.exit("error: no input files (pass paths positionally or via "
-                 "--left/--right/--boxes)")
+        sys.exit("error: no input files (pass paths positionally or via --left/--right/--boxes)")
 
     try:
         left_dot_recs = [parse_recording(p) for p in left_paths]
@@ -1447,8 +1438,7 @@ def cmd_plot(args):
                 bursts_filtered.append(kept)
             else:
                 dropped_bursts += 1
-        bursts = [summarize_burst(b, outlier_sigma=args.box_outlier_sigma)
-                  for b in bursts_filtered]
+        bursts = [summarize_burst(b, outlier_sigma=args.box_outlier_sigma) for b in bursts_filtered]
         # Pass only the kept samples through Series.points so the
         # y-axis range computation in render() doesn't pin the bottom
         # of the chart at 0 (which would defeat the whole point of
@@ -1459,9 +1449,14 @@ def cmd_plot(args):
             "boxes: %s — %d bursts from %d samples "
             "(gap=%gs, min_samples=%d, outlier σ=%g, zeros dropped=%d, "
             "empty bursts dropped=%d)",
-            path, len(bursts), len(points),
-            args.box_gap, args.box_min_samples, args.box_outlier_sigma,
-            dropped_zeros, dropped_bursts,
+            path,
+            len(bursts),
+            len(points),
+            args.box_gap,
+            args.box_min_samples,
+            args.box_outlier_sigma,
+            dropped_zeros,
+            dropped_bursts,
         )
         fmt = KIND_FORMATTER.get(kind, lambda v: f"{v:g}")
         for i, kept in enumerate(bursts_filtered):
@@ -1477,11 +1472,17 @@ def cmd_plot(args):
                 "  burst %d  N=%d  start=%s  median=%s  q1=%s  q3=%s  "
                 "min=%s  max=%s  outliers=%d  "
                 "[pre-outlier: median=%s σ=%s threshold=±%s]",
-                i, s["n"],
+                i,
+                s["n"],
                 datetime.fromtimestamp(s["t_start"]).strftime("%H:%M:%S"),
-                fmt(s["median"]), fmt(s["q1"]), fmt(s["q3"]),
-                fmt(s["min"]), fmt(s["max"]), len(s["outliers"]),
-                fmt(s["median_pre"]), fmt(s["sigma_pre"]),
+                fmt(s["median"]),
+                fmt(s["q1"]),
+                fmt(s["q3"]),
+                fmt(s["min"]),
+                fmt(s["max"]),
+                len(s["outliers"]),
+                fmt(s["median_pre"]),
+                fmt(s["sigma_pre"]),
                 fmt(s["threshold"]),
             )
             for t, v in s["samples"]:
@@ -1494,7 +1495,8 @@ def cmd_plot(args):
                 log.debug(
                     "    [%s] %s  (outlier, >%gσ from median)",
                     datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3],
-                    fmt(v), args.box_outlier_sigma,
+                    fmt(v),
+                    args.box_outlier_sigma,
                 )
 
     left_series = [Series(k, pts, mode="dots") for k, pts in left_dot_recs]
@@ -1545,7 +1547,9 @@ def cmd_plot(args):
                     "routing: --boxes %s placed on LEFT axis "
                     "(right axis already carries kind=%r, "
                     "boxes kind=%r)",
-                    path, right_series[0].kind, bs.kind,
+                    path,
+                    right_series[0].kind,
+                    bs.kind,
                 )
         else:
             sys.exit(
@@ -1570,15 +1574,15 @@ def cmd_plot(args):
     if labels is None and len(all_paths) > 1:
         labels = [os.path.splitext(os.path.basename(p))[0] for p in all_paths]
     if labels is not None and len(labels) != len(all_paths):
-        sys.exit(
-            f"error: --legend got {len(labels)} label(s) for {len(all_paths)} series"
-        )
+        sys.exit(f"error: --legend got {len(labels)} label(s) for {len(all_paths)} series")
 
     try:
         svg = render(
-            left_series, right_series,
+            left_series,
+            right_series,
             log_y=args.log_y,
-            width=args.width, height=args.height,
+            width=args.width,
+            height=args.height,
             styles=args.style,
             labels=labels,
             title=args.title,
@@ -1612,15 +1616,17 @@ def cmd_plot(args):
         )
 
 
-def cmd_ping(args):
-    sys.exit(record_ping(args.host, args.output))
+def cmd_ping(bench, args):
+    output = default_recording_path("ping", bench.stamp) if args.output is None else args.output
+    sys.exit(record_ping(bench.host, args.host, output))
 
 
-def cmd_curl(args):
-    sys.exit(record_curl(args.url, args.output))
+def cmd_curl(bench, args):
+    output = default_recording_path("curl", bench.stamp) if args.output is None else args.output
+    sys.exit(record_curl(bench.host, args.url, output))
 
 
-def cmd_ping_load(args):
+def cmd_ping_load(bench, args):
     """Continuous ping with a 10 MB curl burst every ``--interval`` minutes.
 
     ping samples stream into ``--ping-output`` (truncated at start);
@@ -1632,13 +1638,19 @@ def cmd_ping_load(args):
     gives one chart with latency on the left axis and throughput on the
     right — that's the whole point of the mode.
     """
+    if args.ping_output is None:
+        args.ping_output = default_recording_path("ping", bench.stamp)
+    if args.speed_output is None:
+        args.speed_output = default_recording_path("speed", bench.stamp)
     interval_seconds = args.interval * 60
     if interval_seconds <= 0:
         sys.exit("error: --interval must be a positive number of minutes")
 
     log.info(
         "MODE: ping-load — host=%s url=%s interval=%dmin",
-        args.host, args.url, args.interval,
+        args.host,
+        args.url,
+        args.interval,
     )
     log.info("ping  → %s", args.ping_output)
     log.info("speed → %s", args.speed_output)
@@ -1664,12 +1676,14 @@ def cmd_ping_load(args):
 
     def _ping_runner():
         try:
-            record_ping(args.host, args.ping_output, stop_event=stop_event)
+            record_ping(bench.host, args.host, args.ping_output, stop_event=stop_event)
         except Exception as exc:
             log.exception("ping recorder crashed: %s", exc)
 
     ping_thread = threading.Thread(
-        target=_ping_runner, name="ping-recorder", daemon=True,
+        target=_ping_runner,
+        name="ping-recorder",
+        daemon=True,
     )
     ping_thread.start()
 
@@ -1686,7 +1700,7 @@ def cmd_ping_load(args):
             burst += 1
             log.info("Curl burst #%d → %s", burst, args.url)
             try:
-                record_curl_burst(args.url, args.speed_output)
+                record_curl_burst(bench.host, args.url, args.speed_output)
             except Exception as exc:
                 log.exception("curl burst #%d failed: %s", burst, exc)
             log.info("Curl burst #%d done.", burst)

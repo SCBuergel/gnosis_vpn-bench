@@ -1,0 +1,12 @@
+description = "Experimental 2026.10.28 build (client 0.101.1) on piz-palu-dev, per-user worker"
+network = "piz-palu-dev"
+
+[package]
+channel = "experimental"
+version = "2026.10.28+build.020144.experimental"
+url = "https://download.gnosisvpn.io/linux/apt/pool/experimental/g/gnosisvpn/gnosisvpn_2026.10.28+build.020144.experimental_amd64.deb"
+sha256 = "9b92253a92643cb0465ca01cc9e4ea39a21ba12684555b1bf92b8ee0e470e5df"
+
+[worker]
+model = "v5-user"
+user = "gvpnbench"

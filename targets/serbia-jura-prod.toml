@@ -1,0 +1,9 @@
+label = "Serbia"
+exit_address = "0x4203490fc1747fa6d0ec13c1589cca9d308724ba"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Serbia"
+last_verified = 2026-10-29
+notes = """
+Added to the packaged Jura config by hand. On 2026-10-29 no tunnel was
+established on any of three funded v4 clients (control requests timed out)."""

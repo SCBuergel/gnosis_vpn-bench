@@ -1,0 +1,8 @@
+label = "Serbia"
+exit_address = "0x4203490fc1747fa6d0ec13c1589cca9d308724ba"
+network = "piz-palu-prod"
+profile = "v5-piz-palu-prod"
+location = "Serbia"
+notes = """
+Originally registered on piz-palu-prod (v5). Later downgraded and run on
+jura-prod; see serbia-jura-prod. Not verified on piz-palu-prod by bench."""

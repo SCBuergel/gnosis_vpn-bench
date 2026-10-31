@@ -7,14 +7,13 @@ import logging
 import math
 from pathlib import Path
 
-from config import LOG_DIR, _run_ts
-
 log = logging.getLogger("gnosis_speedtest")
 
 
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
+
 
 def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs)
@@ -30,6 +29,7 @@ def _stdev(xs: list[float]) -> float:
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
+
 
 def _fmt_ms(values: list[float]) -> str:
     if not values:
@@ -63,6 +63,7 @@ def _size_label(size_bytes: int) -> str:
 # File I/O
 # ---------------------------------------------------------------------------
 
+
 def _write_json(path: Path, payload: dict) -> None:
     """Atomically write *payload* as JSON to *path*."""
     tmp = path.with_suffix(".tmp")
@@ -79,9 +80,10 @@ def flush_live(live_file: Path | None, payload: dict) -> None:
     log.debug("Live JSON updated: %s", live_file)
 
 
-def save_results(payload: dict, mode: str) -> None:
-    report_file = LOG_DIR / f"report_{mode}_{_run_ts}.txt"
-    results_file = LOG_DIR / f"results_{mode}_{_run_ts}.json"
+def save_results(payload: dict, mode: str, out_dir: Path, stamp: str) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_file = out_dir / f"report_{mode}_{stamp}.txt"
+    results_file = out_dir / f"results_{mode}_{stamp}.json"
     report = payload.get("_report", "")
     if report:
         print("\n" + report)

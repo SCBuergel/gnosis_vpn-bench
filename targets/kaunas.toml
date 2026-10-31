@@ -1,0 +1,9 @@
+label = "GVPN-LT-1"
+exit_address = "0x01961ef9375e063ab32addf44f0acc8adc71c888"
+network = "piz-palu-dev"
+profile = "v5-piz-palu-dev"
+location = "Kaunas"
+last_verified = 2026-10-28
+notes = """
+Discovered on piz-palu-dev. On 2026-10-28 the control API responded but no
+tunnel was established (UnacceptablePixParams, HTTP 404 at register)."""
