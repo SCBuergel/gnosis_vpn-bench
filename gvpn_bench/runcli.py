@@ -324,11 +324,11 @@ def _single_run_id(refs: list[str]) -> str | None:
 
 
 def auto_push(run: Run) -> bool:
-    """Publish the run's current results without asking. Never raises.
+    """Publish the run's current results without asking.
 
     Called by ladder, sweep and execute as soon as results exist and again
-    before teardown. A failure is reported loudly but never stops the
-    caller, so teardown and the deletion timer are never blocked by it.
+    before teardown. A failure is reported loudly and returns False; only
+    Ctrl-C propagates, and `execute` catches it so teardown still runs.
     """
     args = argparse.Namespace(
         run=[str(run.path)], report_name=None, title=None, link=None, repo=None, dry_run=False, ask=False
@@ -511,7 +511,10 @@ def cmd_execute(args: argparse.Namespace) -> int:
         failure = error
         print(f"FAILED: {type(error).__name__}: {error}")
     if any((run.path / "results").glob("*/result.json")):
-        auto_push(run)  # final data, before any machine is touched by teardown
+        try:
+            auto_push(run)  # final data, before any machine is touched by teardown
+        except KeyboardInterrupt:
+            print("Final push interrupted; tearing down anyway. Retry with: results push " + run.config.id)
     torn_down = True
     if args.keep:
         print("Droplets kept as requested. Run `recover` and `destroy` when done.")

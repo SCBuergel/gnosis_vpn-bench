@@ -2,6 +2,8 @@
 
 A remote run creates billable VMs and moves funds. Every step that does so
 asks before acting. Do not pass `--yes` unless you have decided in advance.
+Publishing results is the exception: by the user's decision, results go to
+the private results repo automatically, without a prompt (step 8).
 
 ## 0. One-time setup
 
@@ -179,7 +181,8 @@ The private results repository is laid out as:
 ```
 README.md                  index of every report and recording
 runs/<start>-<exit>-<profile>/      one recording (one run × one exit)
-reports/<start>-<exits>-<profiles>/ one report over one or more recordings
+reports/<run id>/                   the report of one run (updated by every push)
+reports/<start>-<exits>-<profiles>/ a report over several runs (or --report-name)
 ```
 
 Each folder has `README.md` and `charts/*.svg`, which GitHub renders on
@@ -190,7 +193,8 @@ Results are pushed automatically by `ladder`, `sweep` and `execute` as
 soon as they exist, before any machine is destroyed; run `results push`
 by hand only to retry or to publish several runs together. A single
 run's report is named after the run id, so later pushes update it and
-keep links attached with `results link`.
+keep links attached with `results link`. A push of several runs gets a
+new report each time unless you pass the same `--report-name`.
 
 `results push` adds the given runs' recordings and one report over all of
 them: one line per exit in the overview chart, and error bars (min to max
@@ -206,8 +210,9 @@ were recorded more than once. Other commands:
 Every command scans all generated files and refuses private keys, tokens
 and VM or other public IP addresses, writes only allow-listed file names,
 and refuses public repositories. It does not ask before writing,
-committing and pushing (`--ask` adds a prompt; `--dry-run` only scans). It never creates the results
-repository; create it on GitHub as **private** yourself.
+committing and pushing (`--ask` adds a prompt; `--dry-run` only scans).
+It never creates the results repository; create it on GitHub as
+**private** yourself.
 
 ## Status at any time
 

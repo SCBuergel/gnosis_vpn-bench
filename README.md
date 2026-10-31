@@ -81,8 +81,9 @@ alone. With `--run`, DNS is never touched on the run's VMs, whatever
 
 `execute` pushes results to the private results repo as soon as each
 exit is measured and again before teardown (no prompt), then always
-recovers funds and deletes the droplets, also after an error or Ctrl-C. `--keep` leaves them running, but the deletion
-timer set at provisioning (`deadline_hours`, default 4) still deletes them.
+recovers funds and deletes the droplets, also after an error or Ctrl-C.
+`--keep` leaves them running, but the deletion timer set at provisioning
+(`deadline_hours`, default 4) still deletes them.
 The individual steps:
 
 ```bash

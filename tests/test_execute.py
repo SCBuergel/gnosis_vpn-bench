@@ -301,3 +301,34 @@ def test_execute_help_says_results_are_pushed_before_teardown(capsys):
         main(["execute", "--help"])
     text = " ".join(capsys.readouterr().out.split())
     assert "pushed to the private results repo" in text and "BEFORE recover and destroy" in text
+
+
+def test_ctrl_c_during_final_push_still_tears_down(faked):
+    run, calls, monkeypatch = faked
+    monkeypatch.setattr(steps, "step_provision", lambda *a: (_ for _ in ()).throw(RuntimeError("x")))
+    (run.path / "results" / "austria-jura-prod").mkdir(parents=True)
+    (run.path / "results" / "austria-jura-prod" / "result.json").write_text("{}")
+
+    def interrupted(run):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runcli, "auto_push", interrupted)
+    assert runcli.cmd_execute(args(run)) == 1
+    assert calls == ["teardown"]
+
+
+def test_ctrl_c_during_a_target_push_stops_measuring_and_tears_down(faked):
+    run, calls, monkeypatch = faked
+    monkeypatch.setattr(steps, "step_provision", lambda *a: run.mark("provision"))
+    monkeypatch.setattr(steps, "step_fund_plan", lambda *a: {"nodes": []})
+    monkeypatch.setattr(steps, "step_fund_send", lambda *a: run.mark("fund"))
+    monkeypatch.setattr(steps, "step_connect", lambda user, run, profile, target: calls.append(target.name) or [])
+    monkeypatch.setattr(steps, "step_ladder", lambda run, profile, target: [])
+    monkeypatch.setattr(steps, "step_result", lambda run, profile, target: run.path)
+
+    def interrupted(run):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runcli, "auto_push", interrupted)
+    assert runcli.cmd_execute(args(run)) == 1
+    assert calls == ["netherlands-jura-prod", "teardown"]
