@@ -22,11 +22,15 @@ COLORS = ("#2563eb", "#ea580c", "#059669", "#9333ea", "#ca8a04")
 
 CSS = """
 :root{--bg:#f7f8fa;--card:#fff;--fg:#172033;--muted:#667085;--line:#e5e8ee;--accent:#2563eb;--warn:#8a4b0f;--grid:#edf0f3}
-@media (prefers-color-scheme: dark){:root{--bg:#0f141c;--card:#161d28;--fg:#e6e9ef;--muted:#98a2b3;
---line:#273142;--accent:#60a5fa;--warn:#f0b46b;--grid:#222b38}}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+--bg:#0f141c;--card:#161d28;--fg:#e6e9ef;--muted:#98a2b3;
+--line:#273142;--accent:#60a5fa;--warn:#f0b46b;--grid:#222b38;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f141c;--card:#161d28;--fg:#e6e9ef;--muted:#98a2b3;
+--line:#273142;--accent:#60a5fa;--warn:#f0b46b;--grid:#222b38;color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,sans-serif}
-main{max-width:1140px;margin:auto;padding:32px 16px}
+main{max-width:1140px;margin:auto;padding-block:32px;
+padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:0 0 12px}h3{font-size:15px;margin:18px 0 8px}
 section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px;margin:20px 0}
 .muted,footer{color:var(--muted)}.warn{color:var(--warn)}
