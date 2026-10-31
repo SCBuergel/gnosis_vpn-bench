@@ -9,3 +9,6 @@ indexer = "https://blokli.piz-palu.gnosisvpn.io"
 
 [piz-palu-dev]
 indexer = "https://blokli.piz-palu.dev.gnosisvpn.io"
+
+[piz-palu-staging]
+indexer = "https://blokli.piz-palu.staging.gnosisvpn.io"

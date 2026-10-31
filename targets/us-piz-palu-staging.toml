@@ -1,0 +1,6 @@
+label = "GVPN-US-1"
+exit_address = "0x69e63b0ff81da5968b88331b5526198ef6c2e6ac"
+network = "piz-palu-staging"
+profile = "v5-piz-palu-staging"
+location = "United States"
+notes = "Announced as gvpn:exit on the piz-palu-staging indexer on 2026-10-31."
