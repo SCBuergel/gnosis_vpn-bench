@@ -155,7 +155,8 @@ def _worker(data: dict[str, Any]) -> WorkerModel:
         user = _check_name("worker user", str(data["user"]))
         if user == "root":
             raise ValueError("v5 workers cannot be owned by root")
-        home = str(data.get("home") or f"/var/lib/gnosisvpn/{user}-home")
+        # From 2026.10.31 the service may only write under /home (ProtectSystem=strict).
+        home = str(data.get("home") or f"/home/{user}")
         return WorkerModel(kind="v5-user", user=user, home=home)
     raise ValueError(f"unknown worker model {kind!r}")
 

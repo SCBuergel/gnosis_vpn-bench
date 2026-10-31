@@ -332,3 +332,8 @@ def test_ctrl_c_during_a_target_push_stops_measuring_and_tears_down(faked):
     monkeypatch.setattr(runcli, "auto_push", interrupted)
     assert runcli.cmd_execute(args(run)) == 1
     assert calls == ["netherlands-jura-prod", "teardown"]
+
+
+def test_v5_worker_homes():
+    assert load_profile("v5-piz-palu-prod").worker.home == "/home/gvpnbench"
+    assert load_profile("v5-piz-palu-dev").worker.home == "/var/lib/gnosisvpn/gvpnbench-home"

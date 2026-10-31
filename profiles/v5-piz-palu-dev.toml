@@ -10,3 +10,5 @@ sha256 = "9b92253a92643cb0465ca01cc9e4ea39a21ba12684555b1bf92b8ee0e470e5df"
 [worker]
 model = "v5-user"
 user = "gvpnbench"
+# This build keeps its service account layout; workers lived here when it was tested.
+home = "/var/lib/gnosisvpn/gvpnbench-home"

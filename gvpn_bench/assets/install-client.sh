@@ -25,14 +25,20 @@ GNOSISVPN_NETWORK="$NETWORK" GNOSISVPN_HOPR_BLOKLI_URL="$INDEXER" \
 test "$(dpkg-query -W -f='${Version}' gnosisvpn)" = "$PKG_VERSION"
 
 if [ "$WORKER_KIND" = v5-user ]; then
-    # v5 workers are per-user and cannot be owned by root.
+    # v5 workers are per-user and cannot be owned by root. Builds up to
+    # 2026.10.28 ship a "gnosisvpn" group for them; from 2026.10.31 root's
+    # service spawns the worker as any requesting user and there is no group.
+    if getent group gnosisvpn >/dev/null; then
+        GROUP_ARGS=(--gid gnosisvpn)
+    else
+        GROUP_ARGS=(--user-group)
+    fi
     if ! id "$WORKER_USER" >/dev/null 2>&1; then
-        useradd --create-home --home-dir "$WORKER_HOME" --gid gnosisvpn \
+        useradd --create-home --home-dir "$WORKER_HOME" "${GROUP_ARGS[@]}" \
             --shell /usr/sbin/nologin "$WORKER_USER"
     fi
     test "$(id -u "$WORKER_USER")" -ne 0
     test "$(getent passwd "$WORKER_USER" | cut -d: -f6)" = "$WORKER_HOME"
-    test "$(id -gn "$WORKER_USER")" = gnosisvpn
     ctl() { runuser -u "$WORKER_USER" -- gnosis_vpn-ctl "$@"; }
 elif [ "$WORKER_KIND" = v4-root ]; then
     ctl() { gnosis_vpn-ctl "$@"; }
