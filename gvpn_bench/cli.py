@@ -41,6 +41,7 @@ from .monitor import (
     cmd_plot,
 )
 from .profiles import load_target
+from .runcli import add_run_commands
 from .settings import DEFAULT_RUNS, DEFAULT_WAIT_BETWEEN_S, DEFAULT_WARMUP_S, LOG_DIR
 from .vpn import VpnClient
 
@@ -359,10 +360,15 @@ modes:
     )
     p_pl.set_defaults(func=cmd_ping_load)
 
+    add_run_commands(sub)
+
     args = parser.parse_args(argv)
     if args.mode is None:
         parser.print_help()
         sys.exit(0)
+    if hasattr(args, "run_func"):
+        logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s %(message)s")
+        sys.exit(args.run_func(args))
     now = datetime.now()
     log_file = LOG_DIR / f"speedtest_{now:%Y%m%d_%H%M%S}.log"
     setup_logging(args.log_level, log_file)

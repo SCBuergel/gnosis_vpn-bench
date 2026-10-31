@@ -1,0 +1,834 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SCBuergel/gnosis_vpn-bench/schema/result.schema.json",
+  "title": "gnosis_vpn-bench result",
+  "description": "One benchmark run. See docs/result-schema.md. Missing measurements are null, never 0.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run",
+    "provenance",
+    "concurrent",
+    "per_client",
+    "availability",
+    "failures"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "ladder",
+            "sweep",
+            "local"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "reproducible": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "historical_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Set when imported from an older tool."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "reproducible",
+        "notes"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "bench": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "version",
+            "commit"
+          ]
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "network": {
+              "type": "string"
+            },
+            "channel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "package_version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "package_sha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worker_model": {
+              "enum": [
+                "v4-root",
+                "v5-user",
+                "local"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "network",
+            "channel",
+            "package_version",
+            "package_sha256",
+            "worker_model"
+          ]
+        },
+        "client": {
+          "type": "object",
+          "properties": {
+            "ctl_version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "package_version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "ctl_version",
+            "package_version"
+          ]
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "exit_address": {
+              "type": "string",
+              "pattern": "^0x[0-9a-f]{40}$"
+            },
+            "network": {
+              "type": "string"
+            },
+            "location": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "label",
+            "exit_address",
+            "network",
+            "location"
+          ]
+        },
+        "infrastructure": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "enum": [
+                "digitalocean",
+                "local",
+                "other"
+              ]
+            },
+            "region": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "machines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "vcpus": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "memory_mib": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cpu_model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "os": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kernel": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "role",
+                  "name",
+                  "size",
+                  "vcpus",
+                  "memory_mib",
+                  "cpu_model",
+                  "os",
+                  "kernel"
+                ]
+              }
+            }
+          },
+          "required": [
+            "provider",
+            "region",
+            "machines"
+          ]
+        },
+        "client_config_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bench",
+        "profile",
+        "client",
+        "target",
+        "infrastructure"
+      ]
+    },
+    "concurrent": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "spec": {
+              "type": "object",
+              "properties": {
+                "transfer_bytes": {
+                  "type": "integer"
+                },
+                "deadline_s": {
+                  "type": "number"
+                },
+                "gap_s": {
+                  "type": "number"
+                },
+                "ping_target": {
+                  "type": "string"
+                },
+                "ping_interval_s": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "transfer_bytes",
+                "deadline_s",
+                "gap_s",
+                "ping_target",
+                "ping_interval_s"
+              ]
+            },
+            "origin": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "bytes": {
+                  "type": "integer"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            },
+            "baseline": {
+              "type": "array",
+              "description": "Direct (non-VPN) downloads from the origin; an origin-capacity check, not a VPN result.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "mbps": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "client",
+                  "mbps",
+                  "bytes"
+                ]
+              }
+            },
+            "rungs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/rung"
+              }
+            }
+          },
+          "required": [
+            "spec",
+            "rungs"
+          ]
+        }
+      ]
+    },
+    "per_client": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "connect_time_s": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "exit_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "egress_changed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "measurements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "download",
+                    "upload",
+                    "latency"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "size_bytes": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "mbps": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "kind",
+                "label",
+                "mbps",
+                "ms"
+              ]
+            }
+          }
+        },
+        "required": [
+          "client",
+          "connected",
+          "connect_time_s"
+        ]
+      }
+    },
+    "availability": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "exit_address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]{40}$"
+          },
+          "exit_label": {
+            "type": "string"
+          },
+          "exit_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/$defs/status"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "download_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "download_mbps": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "ping_mean_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "ping_loss_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "api_rtt_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "exit_address",
+          "exit_label",
+          "client",
+          "status",
+          "detail",
+          "download_mbps",
+          "ping_mean_ms",
+          "ping_loss_pct",
+          "api_rtt_ms"
+        ]
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "enum": [
+              "run",
+              "rung",
+              "client",
+              "exit"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "UnacceptablePixParams",
+              "DestinationNotFound",
+              "http_404_register",
+              "timeout",
+              "control_timeout",
+              "worker_not_ready",
+              "connect_rejected",
+              "route_bypass",
+              "download_incomplete",
+              "no_overlap",
+              "not_run",
+              "error"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "scope",
+          "subject",
+          "status",
+          "detail",
+          "at"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "enum": [
+        "connected",
+        "UnacceptablePixParams",
+        "DestinationNotFound",
+        "http_404_register",
+        "timeout",
+        "control_timeout",
+        "worker_not_ready",
+        "connect_rejected",
+        "route_bypass",
+        "download_incomplete",
+        "no_overlap",
+        "not_run",
+        "error"
+      ],
+      "description": "Fixed outcome list. 'connected' is the only success value."
+    },
+    "rung": {
+      "type": "object",
+      "properties": {
+        "rung": {
+          "type": "integer"
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "failed",
+            "not_run"
+          ]
+        },
+        "failure_status": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/status"
+            }
+          ]
+        },
+        "total_mbps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "overlap_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_skew_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "gap_before_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "overlap_start": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "overlap_end": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "per_client": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "client": {
+                "type": "string"
+              },
+              "mbps": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "overlap_bytes": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "downloaded_bytes": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "complete": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "sha256_verified": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "timed_out": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "ping_mean_ms": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "ping_loss_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "ping_sent": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "ping_received": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "timeseries": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Per-second samples since the rung's scheduled start.",
+                "properties": {
+                  "t_s": {
+                    "type": "array"
+                  },
+                  "mbps": {
+                    "type": "array"
+                  },
+                  "rtt_ms": {
+                    "type": "array"
+                  }
+                }
+              }
+            },
+            "required": [
+              "client",
+              "mbps",
+              "overlap_bytes",
+              "downloaded_bytes",
+              "complete",
+              "sha256_verified",
+              "timed_out",
+              "ping_mean_ms",
+              "ping_loss_pct"
+            ]
+          }
+        }
+      },
+      "required": [
+        "rung",
+        "clients",
+        "status",
+        "failure_status",
+        "total_mbps",
+        "overlap_s",
+        "start_skew_ms",
+        "gap_before_s",
+        "per_client"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "measured"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "total_mbps": {
+                "type": "null"
+              },
+              "failure_status": {
+                "$ref": "#/$defs/status"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
