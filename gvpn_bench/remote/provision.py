@@ -25,6 +25,7 @@ from typing import Any
 from ..host import Host, SshHost, run_script, write_file
 from ..profiles import Profile
 from ..runs import Run, utc_now, write_private_json
+from ..status import start_client_accepted
 from ..vpn import CtlError
 from . import deadline
 from .assets import asset, asset_bytes
@@ -233,7 +234,7 @@ def start_worker(host: Host, profile: Profile, attempts: int = 30, pause_s: floa
     for _ in range(attempts):
         try:
             response = vpn.ctl("start-client", "30m", timeout_s=45)
-            if response.get("StartClient") in ("Started", "AlreadyRunning"):
+            if start_client_accepted(response):
                 return
             last = json.dumps(response)[:200]
         except CtlError as error:

@@ -40,6 +40,8 @@ def test_register_refusals_counts_only_timestamped_lines_since_the_attempt():
     )
     found = connect.register_refusals(log, "2026-10-31T14:01:00.000000Z")
     assert len(found) == 2
+    other_error = '2026-10-31T14:05:13.404404Z ERROR url: "http://x/api/v1/clients/register" kind: Status(500, None)'
+    assert connect.register_refusals(other_error, "2026-10-31T14:01:00.000000Z") == []
 
 
 def test_slots_from_probe():
@@ -89,7 +91,11 @@ def test_two_refusals_end_the_attempt_early(fast_clock):
 
 def test_one_refusal_with_no_free_slot_ends_the_attempt(fast_clock):
     probe = {"load": {"slots": {"total": 2, "available": 0, "connected": 2}}}
-    assert try_connect(refusing_host(1, probe), timeout_s=60).status == "http_404_register"
+    started = time.monotonic()
+    outcome = try_connect(refusing_host(1, probe), timeout_s=60)
+    assert outcome.status == "http_404_register"
+    assert "refused registration 1x" in outcome.detail
+    assert time.monotonic() - started < 10  # ended early, not at the 60 s timeout
 
 
 def test_one_refusal_with_free_slots_keeps_waiting(fast_clock):
@@ -206,7 +212,16 @@ def test_step_ladder_passes_only_connected_clients(run, monkeypatch):
     steps.step_ladder(run, run.config.profile(), run.config.target())
     assert seen["names"] == ["client1", "client2"]
     assert seen["unavailable"] == {"client3": "http_404_register"}
-    assert callable(seen["reconnect"])
+    calls = []
+
+    def fake_connect_to(host, vm_ip, profile, exit_address, *, route_checks, timeout_s):
+        calls.append((host.name, vm_ip, exit_address, route_checks, timeout_s))
+        return connect.ConnectOutcome(host.name, "connected")
+
+    monkeypatch.setattr(steps, "connect_to", fake_connect_to)
+    assert seen["reconnect"](pairs[1][1]) is True
+    target = run.config.target()
+    assert calls == [("client2", "192.0.2.2", target.exit_address, ["192.0.2.9", run.config.ladder.ping_target], 120)]
 
 
 # -- pre-flight ----------------------------------------------------------------------------------
@@ -328,3 +343,24 @@ def test_worker_that_never_starts_after_upload_fails_provisioning(monkeypatch):
     host = FakeHost(lambda a, d: ok({"StartClient": "ServiceNotReady"}), name="client1")
     with pytest.raises(RuntimeError, match="did not start"):
         provision.start_worker(host, profile, attempts=3)
+    started = FakeHost(lambda a, d: ok({"StartClient": {"Started": {}}}), name="client1")
+    provision.start_worker(started, profile, attempts=1)  # the serde struct form counts too
+
+
+def test_reconnect_note_keeps_a_failure_detail(run, monkeypatch):
+    state = {"client1": False}
+    fake_ladder(monkeypatch, lambda host: state.get(host.name, True))
+    monkeypatch.setattr(
+        ladder,
+        "rung_entry",
+        lambda rung, raw, sha, gap: ladder.empty_rung(rung, sorted(raw), "failed", "no_overlap", "no common interval"),
+    )
+
+    def reconnect(host):
+        state[host.name] = True
+        return True
+
+    rungs = ladder.run_ladder(
+        run, run.config.profile(), run.config.target(), hosts("client1"), "192.0.2.1", "aa", reconnect=reconnect
+    )
+    assert rungs[0]["detail"] == "no common interval; reconnected before this rung: client1"

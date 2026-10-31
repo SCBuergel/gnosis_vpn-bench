@@ -183,7 +183,7 @@ def register_refusals(log_text: str, since: str) -> list[str]:
         stamp = line.split(" ", 1)[0]
         if len(stamp) < 20 or not stamp.endswith("Z") or stamp[4] != "-" or stamp[10] != "T":
             continue
-        if stamp >= since and "clients/register" in line and "404" in line:
+        if stamp >= since and "clients/register" in line and "Status(404" in line:
             found.append(line)
     return found
 

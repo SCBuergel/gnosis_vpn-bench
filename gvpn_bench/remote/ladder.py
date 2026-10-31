@@ -269,7 +269,8 @@ def run_ladder(
         raw_by_rung[rung] = raw
         rungs.append(rung_entry(rung, raw, origin_sha256, gap))
         if reconnected:
-            rungs[-1]["detail"] = f"reconnected before this rung: {', '.join(reconnected)}"
+            note = f"reconnected before this rung: {', '.join(reconnected)}"
+            rungs[-1]["detail"] = f"{rungs[-1]['detail']}; {note}" if rungs[-1]["detail"] else note
         log.info("rung %d: %s Mbit/s", rung, rungs[-1]["total_mbps"])
     # All rungs done: now fetch the complete ping logs and recompute.
     for position, rung in enumerate(spec.rungs):
