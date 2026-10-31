@@ -244,6 +244,5 @@ def check_compatible(profile: Profile, target: Target) -> None:
     """Refuse a profile/target pair on different networks."""
     if profile.network.name != target.network:
         raise ValueError(
-            f"target {target.name} is on {target.network}, "
-            f"but profile {profile.name} joins {profile.network.name}"
+            f"target {target.name} is on {target.network}, but profile {profile.name} joins {profile.network.name}"
         )

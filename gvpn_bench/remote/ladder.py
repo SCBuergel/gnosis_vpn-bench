@@ -201,9 +201,7 @@ def run_ladder(
             continue
         try:
             parallel(
-                partial(
-                    launch, spec=spec, attempt=attempt, rung=rung, start_at=start_at, origin_ip=origin_ip
-                ),
+                partial(launch, spec=spec, attempt=attempt, rung=rung, start_at=start_at, origin_ip=origin_ip),
                 hosts,
             )
         except RuntimeError as error:

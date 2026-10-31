@@ -134,9 +134,7 @@ def try_connect(host):
     profile = MagicMock()
     profile.worker.ctl_prefix.return_value = []
     profile.worker.worker_log_glob.return_value = "/var/log/x"
-    return connect.connect_client(
-        host, "203.0.113.5", profile, SERBIA, route_checks=["192.0.2.1"], timeout_s=5
-    )
+    return connect.connect_client(host, "203.0.113.5", profile, SERBIA, route_checks=["192.0.2.1"], timeout_s=5)
 
 
 def test_connect_succeeds_only_with_changed_egress_and_tunnel_routes():

@@ -30,9 +30,7 @@ log = logging.getLogger("gnosis_speedtest")
 
 def vpn_for(host: Host, profile: Profile) -> VpnClient:
     """A VpnClient addressing this profile's worker. VMs never get the DNS rewrite."""
-    return VpnClient(
-        host=host, ctl_prefix=profile.worker.ctl_prefix(), dns_mode="never", json_flag=("-o", "json")
-    )
+    return VpnClient(host=host, ctl_prefix=profile.worker.ctl_prefix(), dns_mode="never", json_flag=("-o", "json"))
 
 
 @dataclass
@@ -81,9 +79,7 @@ def connect_client(
     try:
         vpn.ctl("start-client", "30m", timeout_s=45)
     except CtlError as error:
-        return ConnectOutcome(
-            host.name, "control_timeout" if "timed out" in str(error) else "error", str(error)
-        )
+        return ConnectOutcome(host.name, "control_timeout" if "timed out" in str(error) else "error", str(error))
     if not wait_running(vpn):
         return ConnectOutcome(host.name, "worker_not_ready", "worker did not reach Running with destinations")
     status = vpn.status()
@@ -100,9 +96,7 @@ def connect_client(
         status_name = "control_timeout" if "timed out" in str(error) else "connect_rejected"
         return ConnectOutcome(host.name, status_name, str(error), destination=destination)
     if "Connect" not in response:
-        return ConnectOutcome(
-            host.name, "connect_rejected", json.dumps(response)[:300], destination=destination
-        )
+        return ConnectOutcome(host.name, "connect_rejected", json.dumps(response)[:300], destination=destination)
     connected = False
     last_status = status
     while time.monotonic() < t0 + timeout_s:
@@ -134,15 +128,11 @@ def connect_client(
         detail = f"egress IP lookup through the tunnel failed: {egress.stderr.strip()[:200]}"
         return ConnectOutcome(host.name, "error", detail, elapsed, destination)
     if egress_ip == vm_ip:
-        return ConnectOutcome(
-            host.name, "route_bypass", "public IP unchanged by the VPN", elapsed, destination
-        )
+        return ConnectOutcome(host.name, "route_bypass", "public IP unchanged by the VPN", elapsed, destination)
     routes_ok, routes = tunnel_routes_ok(host, route_checks)
     evidence["routes"] = routes
     if not routes_ok:
-        return ConnectOutcome(
-            host.name, "route_bypass", "a measurement destination bypasses the tunnel", elapsed
-        )
+        return ConnectOutcome(host.name, "route_bypass", "a measurement destination bypasses the tunnel", elapsed)
     return ConnectOutcome(host.name, "connected", "", elapsed, destination, egress_ip, evidence)
 
 

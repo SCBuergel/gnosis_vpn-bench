@@ -87,7 +87,7 @@ def test_report_sections_are_in_fixed_order_and_escaped():
         html.index(heading)
         for heading in (
             "1. Concurrent bandwidth",
-            "2. Per-client results",
+            "2. Per client",
             "3. Availability and failures",
             "4. Provenance",
         )
@@ -102,7 +102,7 @@ def test_report_sections_are_in_fixed_order_and_escaped():
 def test_report_without_ladder_says_so():
     result = sample_result()
     result["concurrent"] = None
-    assert "no concurrent-load" in render(result)
+    assert "No recording has a concurrent-load ladder" in render(result)
 
 
 def test_tick_labels_avoid_e_notation():

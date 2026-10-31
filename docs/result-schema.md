@@ -146,11 +146,15 @@ builds. Order by `run.started_at`. Within a ladder, compare
 `concurrent.rungs[].total_mbps` per `rung`; never compare availability-check
 rates with ladder rates.
 
-## Files next to `result.json`
+## Files in the results repository
 
-| File | Published by `results push` |
-|------|------------------------------|
-| `result.json` | yes |
-| `report.html` | yes (rendered from `result.json`) |
-| `provenance.json` | yes (copy of `result.provenance`) |
-| `run.toml`, `state/`, `data/`, logs | never |
+`results push` writes generated files only; run state never leaves the run
+directory.
+
+| Folder | Files |
+|--------|-------|
+| `runs/<YYYY-MM-DD>-<HHMMSS>Z-<target>-<profile>/` (one recording) | `result.json`, `provenance.json`, `report.html`, `README.md`, `charts/*.svg` |
+| `reports/<name>/` (one or more recordings) | `report.json` (`title`, `recordings` = folder names under `runs/`, `links`), `report.html`, `README.md`, `charts/*.svg` |
+| repository root | `README.md`, the index of all reports and recordings |
+
+Never published: `run.toml`, `state/`, `data/`, logs, keys, backups.

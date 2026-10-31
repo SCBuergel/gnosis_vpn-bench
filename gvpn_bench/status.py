@@ -155,9 +155,7 @@ def parse_status(payload: dict[str, Any]) -> ClientStatus:
         if entry.get("route_health") is not None:
             route_health[destination.id] = entry["route_health"]
     connecting = status.get("connecting")
-    disconnecting = [
-        dest_id for dest_id in map(_destination_id, status.get("disconnecting") or []) if dest_id
-    ]
+    disconnecting = [dest_id for dest_id in map(_destination_id, status.get("disconnecting") or []) if dest_id]
     run_mode_raw = status.get("run_mode", "Unknown")
     return ClientStatus(
         run_mode=variant_name(run_mode_raw),

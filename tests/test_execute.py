@@ -84,9 +84,7 @@ def test_execute_measures_every_target_then_tears_down(faked):
     monkeypatch.setattr(steps, "step_provision", lambda *a: run.mark("provision"))
     monkeypatch.setattr(steps, "step_fund_plan", lambda *a: {"nodes": []})
     monkeypatch.setattr(steps, "step_fund_send", lambda *a: run.mark("fund"))
-    monkeypatch.setattr(
-        steps, "step_connect", lambda user, run, profile, target: calls.append(target.name) or []
-    )
+    monkeypatch.setattr(steps, "step_connect", lambda user, run, profile, target: calls.append(target.name) or [])
     monkeypatch.setattr(steps, "step_ladder", lambda run, profile, target: [])
     monkeypatch.setattr(steps, "step_result", lambda run, profile, target: run.path / target.name)
     assert runcli.cmd_execute(args(run)) == 0
@@ -117,9 +115,7 @@ def test_funds_sent_by_journal_state(tmp_path, status, expected):
     Journal(run).append(
         {"hash": "0x1", "sender": "0x2", "nonce": 0, "purpose": "fund:client1:wxhopr", "status": status}
     )
-    Journal(run).append(
-        {"hash": "0x3", "sender": "0x2", "nonce": 1, "purpose": "close:client1:x", "status": "pending"}
-    )
+    Journal(run).append({"hash": "0x3", "sender": "0x2", "nonce": 1, "purpose": "close:client1:x", "status": "pending"})
     assert steps.funds_sent(run) is expected
 
 
@@ -248,9 +244,7 @@ def test_declining_the_funding_prompt_sends_nothing_and_tears_down(faked):
     answers = iter([True, False])  # yes to the run, no to the amounts
     monkeypatch.setattr(runcli, "confirm", lambda prompt, assume_yes: next(answers))
     monkeypatch.setattr(steps, "step_provision", lambda *a: run.mark("provision"))
-    monkeypatch.setattr(
-        steps, "step_fund_plan", lambda *a: {"nodes": [{"name": "c1", "wxhopr": "1", "xdai": "0"}]}
-    )
+    monkeypatch.setattr(steps, "step_fund_plan", lambda *a: {"nodes": [{"name": "c1", "wxhopr": "1", "xdai": "0"}]})
     monkeypatch.setattr(steps, "step_fund_send", lambda *a: pytest.fail("funds sent without consent"))
     assert runcli.cmd_execute(argparse.Namespace(run=str(run.path), yes=False, keep=False, target=None)) == 1
     assert calls == ["teardown"]

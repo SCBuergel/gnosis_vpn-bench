@@ -333,9 +333,7 @@ def import_serbia_v4(lithuania_repo: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("serbia_repo", type=Path)
     parser.add_argument("lithuania_repo", type=Path)
     parser.add_argument("--out", type=Path, help="default: the configured runs directory")

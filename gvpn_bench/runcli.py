@@ -88,9 +88,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         recovered = _read_state(run, "cleanup.json")
         print("Funds:")
         for node in funding:
-            print(
-                f"  {node['name']}: sent {node['wxhopr']} wxHOPR + {node['xdai']} xDAI to {node['address']}"
-            )
+            print(f"  {node['name']}: sent {node['wxhopr']} wxHOPR + {node['xdai']} xDAI to {node['address']}")
         if recovered:
             print(
                 f"  recovered {recovered.get('recovered_wxHOPR')} wxHOPR, "
@@ -209,11 +207,7 @@ def cmd_ladder(args: argparse.Namespace) -> int:
     _user, run, profile, target = _open(args)
     rungs = steps.step_ladder(run, profile, target)
     for rung in rungs:
-        value = (
-            rung["total_mbps"]
-            if rung["total_mbps"] is not None
-            else f"not measured ({rung['failure_status']})"
-        )
+        value = rung["total_mbps"] if rung["total_mbps"] is not None else f"not measured ({rung['failure_status']})"
         print(f"  rung {rung['rung']}: {value}")
     directory = steps.step_result(run, profile, target)
     print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
@@ -274,45 +268,114 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_results_push(args: argparse.Namespace) -> int:
-    from .results import push
-
-    user = load_user_config()
-    repo = Path(args.repo).expanduser() if args.repo else user.results_repo
+def _results_repo(args: argparse.Namespace) -> Path | None:
+    repo = Path(args.repo).expanduser() if args.repo else load_user_config().results_repo
     if repo is None:
-        print(
-            "No results repository: pass --repo PATH or set [results] repo "
-            "in ~/.config/gvpn-bench/config.toml"
-        )
-        return 2
-    plans = [push.prepare(directory, repo) for directory in result_dirs(args.run)]
-    print(f"Repo      : {repo}")
-    refused = False
-    for plan in plans:
-        print(f"Result    : {plan.source}")
-        print(f"  → {plan.destination.relative_to(repo)}: {', '.join(p.name for p in plan.files)}")
-        if plan.scan.clean:
-            print("  scan clean (no private keys, tokens or VM/public IPs)")
-        else:
-            refused = True
-            for problem in plan.scan.problems:
-                print(f"  REFUSED: {problem}")
-    if refused:
+        print("No results repository: pass --repo PATH or set [results] repo in ~/.config/gvpn-bench/config.toml")
+    return repo
+
+
+def _publish(args: argparse.Namespace, repo: Path, staged: list[Any], message: str) -> int:
+    """Scan, show, ask, write, index, commit, push. Shared by every results command."""
+    from .results import publish, push
+
+    staged = [*staged, publish.index_staged(repo, staged)]
+    print(f"Repo: {repo}")
+    for item in staged:
+        print(f"  {item.folder or '(index)'}/: {len(item.files)} files")
+    problems = publish.scan(staged)
+    if problems:
+        for problem in problems:
+            print(f"REFUSED: {problem}")
         return 1
+    print("Scan clean (no private keys, tokens or VM/public IPs).")
     if args.dry_run:
-        print("Dry run: nothing copied, committed or pushed.")
+        print("Dry run: nothing written, committed or pushed.")
         return 0
     remote = push.check_results_repo(repo)
-    if not confirm(f"Commit these files in {repo} and push to {remote}?", args.yes):
-        print("Nothing copied, committed or pushed.")
+    if not confirm(f"Write these files in {repo}, commit and push to {remote}?", args.yes):
+        print("Nothing written, committed or pushed.")
         return 0
-    changed = [push.copy_and_commit(plan, f"Add results {plan.destination.name}") for plan in plans]
-    if not any(changed):
+    paths = publish.write(repo, staged)
+    if not push.commit(repo, paths, message):
         print("Nothing changed; no commit, nothing pushed.")
         return 0
     push.push(repo)
     print("Pushed.")
     return 0
+
+
+def cmd_results_push(args: argparse.Namespace) -> int:
+    """Recordings of one or more runs plus one report over all of them.
+
+    The report is multi-location when the recordings cover several exits,
+    and shows error bars where the same exit and client were recorded again.
+    """
+    from .results import publish
+    from .results.collection import Recording
+
+    repo = _results_repo(args)
+    if repo is None:
+        return 2
+    directories = [directory for ref in args.run for directory in result_dirs(ref)]
+    staged = [publish.stage_recording(directory) for directory in directories]
+    recordings = [Recording(item.folder.split("/", 1)[1], json.loads(item.files["result.json"])) for item in staged]
+    links = dict(args.link or [])
+    staged.append(publish.stage_report(recordings, name=args.report_name, title=args.title, links=links))
+    return _publish(args, repo, staged, f"Add results {staged[-1].folder}")
+
+
+def cmd_results_combine(args: argparse.Namespace) -> int:
+    """A report over recordings already in the repo, e.g. the same exit over several days."""
+    from .results import publish
+
+    repo = _results_repo(args)
+    if repo is None:
+        return 2
+    available = publish.repo_recordings(repo)
+    missing = [name for name in args.recordings if name not in available]
+    if missing:
+        print(f"Not in {repo}/runs: {', '.join(missing)}")
+        return 2
+    members = [available[name] for name in args.recordings]
+    report = publish.stage_report(members, name=args.name, title=args.title, links=dict(args.link or []))
+    return _publish(args, repo, [report], f"Add report {report.folder}")
+
+
+def cmd_results_rebuild(args: argparse.Namespace) -> int:
+    """Regenerate every page in the repo from its stored result.json files."""
+    from .results import publish
+
+    repo = _results_repo(args)
+    if repo is None:
+        return 2
+    return _publish(args, repo, publish.rebuild_all(repo), "Rebuild reports")
+
+
+def cmd_results_link(args: argparse.Namespace) -> int:
+    """Attach a link (e.g. the Claude-app page) to a report and rebuild it."""
+    from .results import publish
+
+    repo = _results_repo(args)
+    if repo is None:
+        return 2
+    meta_file = repo / "reports" / args.report / "report.json"
+    if not meta_file.exists():
+        print(f"No report {args.report} in {repo}/reports")
+        return 2
+    meta = json.loads(meta_file.read_text())
+    recordings = publish.repo_recordings(repo)
+    members = [recordings[name] for name in meta["recordings"]]
+    links = {**meta.get("links", {}), args.label: args.url}
+    staged = publish.stage_report(members, name=args.report, title=meta["title"], links=links)
+    return _publish(args, repo, [staged], f"Link {args.label} for {args.report}")
+
+
+def _link_pair(text: str) -> tuple[str, str]:
+    label, sep, url = text.partition("=")
+    if not sep or not url.startswith("https://"):
+        raise argparse.ArgumentTypeError("use LABEL=https://...")
+    return label, url
 
 
 def _teardown(user: Any, run: Run, profile: Any) -> bool:
@@ -378,9 +441,7 @@ def cmd_execute(args: argparse.Namespace) -> int:
                 print(f"  {outcome.client}: {outcome.status} {outcome.detail}")
             for rung in steps.step_ladder(run, profile, target):
                 value = rung["total_mbps"]
-                shown = (
-                    f"{value:.2f} Mbit/s" if value is not None else f"not measured ({rung['failure_status']})"
-                )
+                shown = f"{value:.2f} Mbit/s" if value is not None else f"not measured ({rung['failure_status']})"
                 print(f"  rung {rung['rung']}: {shown}")
             print(f"  wrote {steps.step_result(run, profile, target)}")
     except KeyboardInterrupt as error:
@@ -400,9 +461,7 @@ def cmd_execute(args: argparse.Namespace) -> int:
 def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("plan", help="create a run directory with run.toml (no spending)")
     p.add_argument("--profile", required=True, help="profiles/<name>.toml")
-    p.add_argument(
-        "--target", required=True, action="append", help="targets/<name>.toml (repeat for several exits)"
-    )
+    p.add_argument("--target", required=True, action="append", help="targets/<name>.toml (repeat for several exits)")
     p.add_argument("--id", help="run id (default: <UTC time>-<target>-<profile>)")
     p.add_argument("--client-config", metavar="FILE", help="client config.toml to install on the VMs")
     p.add_argument("--notes", default="", help="free text stored in run.toml and result.json")
@@ -420,17 +479,42 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("config", help="show credential and run locations; check file modes")
     p.set_defaults(run_func=cmd_config)
 
-    p = sub.add_parser("results", help="publish results (see `results push -h`)")
+    p = sub.add_parser("results", help="publish to the private results repo (push, combine, rebuild, link)")
     results_sub = p.add_subparsers(dest="results_command", required=True)
-    p = results_sub.add_parser(
-        "push",
-        help="copy result.json/report.html/provenance.json to the private results repo, scan, commit, push",
+
+    def common(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--repo", metavar="PATH", help="local checkout of the results repo (default: user config)")
+        parser.add_argument("--dry-run", action="store_true", help="show files and scan result only")
+        parser.add_argument("--yes", action="store_true", help="write, commit and push without asking")
+
+    p = results_sub.add_parser("push", help="add runs' recordings and one report over all of them, scan, commit, push")
+    p.add_argument(
+        "run", nargs="+", help="run ids, run directories, or directories with a result.json (all go into one report)"
     )
-    p.add_argument("run", help="run id, run directory, or any directory with a result.json")
-    p.add_argument("--repo", metavar="PATH", help="local checkout of the results repo (default: user config)")
-    p.add_argument("--dry-run", action="store_true", help="show files and scan result only")
-    p.add_argument("--yes", action="store_true", help="push without asking")
+    p.add_argument("--report-name", help="folder name under reports/ (default: start time + exits + profile)")
+    p.add_argument("--title", help="report title")
+    p.add_argument("--link", action="append", type=_link_pair, metavar="LABEL=URL", help="link shown on the report")
+    common(p)
     p.set_defaults(run_func=cmd_results_push)
+
+    p = results_sub.add_parser("combine", help="add a report over recordings already in the repo")
+    p.add_argument("recordings", nargs="+", metavar="RECORDING", help="folder names under runs/")
+    p.add_argument("--name", help="folder name under reports/ (default: start time + exits + profiles)")
+    p.add_argument("--title", help="report title")
+    p.add_argument("--link", action="append", type=_link_pair, metavar="LABEL=URL", help="link shown on the report")
+    common(p)
+    p.set_defaults(run_func=cmd_results_combine)
+
+    p = results_sub.add_parser("rebuild", help="regenerate every report page from the stored result.json files")
+    common(p)
+    p.set_defaults(run_func=cmd_results_rebuild)
+
+    p = results_sub.add_parser("link", help="attach a link (e.g. the Claude-app page) to a report")
+    p.add_argument("report", help="folder name under reports/")
+    p.add_argument("label")
+    p.add_argument("url")
+    common(p)
+    p.set_defaults(run_func=cmd_results_link)
 
     p = sub.add_parser(
         "execute",

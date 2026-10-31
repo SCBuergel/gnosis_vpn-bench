@@ -117,9 +117,7 @@ def check_exit(
             return row
         row["status"] = "connected"
         row["download_mbps"] = round(download["speed_download"] * 8 / 1e6, 3)
-        pings = host.run(
-            ["ping", "-n", "-c", "3", "-i", "1", "-W", "5", "-w", "18", ping_target], timeout_s=25
-        )
+        pings = host.run(["ping", "-n", "-c", "3", "-i", "1", "-W", "5", "-w", "18", ping_target], timeout_s=25)
         row["ping_mean_ms"], row["ping_loss_pct"] = ping_summary(pings.stdout, 3)
         row["detail"] = f"{CHECK_BYTES} B tunnelled download + 3 pings to {ping_target}"
         return row

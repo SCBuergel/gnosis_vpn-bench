@@ -160,9 +160,7 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
     _parallel(lambda host: disconnect(host, profile), hosts)
     route_checks = [str(origin.ip), run.config.ladder.ping_target]
     outcomes = _parallel(
-        lambda pair: connect_client(
-            pair[1], str(pair[0].ip), profile, target.exit_address, route_checks=route_checks
-        ),
+        lambda pair: connect_client(pair[1], str(pair[0].ip), profile, target.exit_address, route_checks=route_checks),
         pairs,
     )
     for outcome, (_entry, host) in zip(outcomes, pairs, strict=True):
@@ -270,9 +268,7 @@ def step_recover_finalize(user: UserConfig, run: Run, profile: Profile) -> dict[
 
     destination = load_funding_source(user.funding_key_file).safe
     cleanup = finalize(connect_chain(), run, profile, [m.name for m in clients(run)], destination)
-    run.mark(
-        "recover", recovered_wxHOPR=cleanup["recovered_wxHOPR"], recovered_xDAI=cleanup["recovered_xDAI"]
-    )
+    run.mark("recover", recovered_wxHOPR=cleanup["recovered_wxHOPR"], recovered_xDAI=cleanup["recovered_xDAI"])
     return cleanup
 
 
@@ -283,9 +279,7 @@ def step_destroy(user: UserConfig, run: Run, profile: Profile) -> dict[str, Any]
         from ..finance.recover import verify_for_destroy
         from ..finance.wallet import connect_chain
 
-        verify_for_destroy(
-            connect_chain(), run, profile, [m.name for m in clients(run)], [m.id for m in inventory]
-        )
+        verify_for_destroy(connect_chain(), run, profile, [m.name for m in clients(run)], [m.id for m in inventory])
     guards.stop_heartbeat(run)
     api = api_for(user)
     tag = run_tag(run.config.id)

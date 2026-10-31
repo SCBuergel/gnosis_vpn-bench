@@ -83,9 +83,7 @@ def preflight(run: Run, profile: Profile) -> None:
         if not run.config.client_config.exists():
             raise FileNotFoundError(run.config.client_config)
         if profile.client_config_path is None:
-            raise RuntimeError(
-                f"run has a client_config but profile {profile.name} sets no client_config_path"
-            )
+            raise RuntimeError(f"run has a client_config but profile {profile.name} sets no client_config_path")
     if run.config.infra.provider != "digitalocean":
         raise RuntimeError(f"provider {run.config.infra.provider!r} is not supported")
 
@@ -178,9 +176,7 @@ def upload_tools(host: Host) -> None:
 
 def prepare_origin(run: Run, host: Host) -> dict[str, Any]:
     upload_tools(host)
-    result = run_script(
-        host, asset("setup-origin.sh"), [str(run.config.ladder.transfer_bytes)], timeout_s=300
-    )
+    result = run_script(host, asset("setup-origin.sh"), [str(run.config.ladder.transfer_bytes)], timeout_s=300)
     if not result.ok:
         raise RuntimeError(f"origin setup failed: {result.stderr.strip()[-400:]}")
     sha256 = result.stdout.strip().splitlines()[-1]
@@ -254,9 +250,7 @@ def provision(run: Run, profile: Profile, api: Api) -> list[Machine]:
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(hosts)) as pool:
         list(pool.map(wait_ready, hosts.values()))
         jobs = [pool.submit(prepare_origin, run, hosts["origin"])]
-        jobs += [
-            pool.submit(prepare_client, run, profile, hosts[m.name]) for m in machines if m.role == "client"
-        ]
+        jobs += [pool.submit(prepare_client, run, profile, hosts[m.name]) for m in machines if m.role == "client"]
         for job in concurrent.futures.as_completed(jobs):
             job.result()
         infos = dict(zip(hosts, pool.map(system_info, hosts.values()), strict=True))
@@ -272,7 +266,5 @@ def describe_plan(run: Run, profile: Profile) -> str:
     for plan in machine_plan(run):
         lines.append(f"  {plan.name:<8} {plan.size:<6} {infra.provider} {infra.region}")
     lines.append(f"  package {profile.package.version} ({profile.package.channel}) on {profile.network.name}")
-    lines.append(
-        f"  deletion timer: {infra.deadline_hours} h from now (skips funded runs without identity backups)"
-    )
+    lines.append(f"  deletion timer: {infra.deadline_hours} h from now (skips funded runs without identity backups)")
     return "\n".join(lines)

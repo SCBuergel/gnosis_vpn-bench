@@ -13,9 +13,7 @@ SERBIA = Path.home() / "gnosis-vpn-serbia-ladder"
 LITHUANIA = Path.home() / "gnosis-vpn-lithuania-ladder"
 PUBLIC_IPV4 = re.compile(r"\b(?!9\.9\.9\.9\b)(?:\d{1,3}\.){3}\d{1,3}\b")
 
-pytestmark = pytest.mark.skipif(
-    not (SERBIA.exists() and LITHUANIA.exists()), reason="ladder repos not present"
-)
+pytestmark = pytest.mark.skipif(not (SERBIA.exists() and LITHUANIA.exists()), reason="ladder repos not present")
 
 
 @pytest.mark.parametrize(

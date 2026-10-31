@@ -165,9 +165,7 @@ def _validate_concurrent(concurrent: dict[str, Any]) -> None:
         _check_type(_require(rung, "clients", path), (list,), f"{path}.clients")
         status = _require(rung, "status", path)
         _enum(status, RUNG_STATUSES, f"{path}.status")
-        _enum(
-            _require(rung, "failure_status", path), FAILURE_STATUSES, f"{path}.failure_status", nullable=True
-        )
+        _enum(_require(rung, "failure_status", path), FAILURE_STATUSES, f"{path}.failure_status", nullable=True)
         if status != "measured" and rung["failure_status"] is None:
             raise SchemaError(f"{path}: an unmeasured rung needs a failure_status")
         for key in ("total_mbps", "overlap_s", "start_skew_ms", "gap_before_s"):

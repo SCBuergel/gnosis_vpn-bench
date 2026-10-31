@@ -166,12 +166,35 @@ are gone, and cancels the deletion timer.
 
 ```bash
 ./gnosis_vpn-bench results push RUN --dry-run
-./gnosis_vpn-bench results push RUN
+./gnosis_vpn-bench results push RUN [RUN ...] [--title T] [--link "Claude app=https://claude.ai/artifact/…"]
 ```
 
-The step copies only `result.json`, `report.html` and `provenance.json`.
-It refuses on private keys, tokens or IP addresses, refuses public
-repositories, and asks before pushing. It never creates the results
+The private results repository is laid out as:
+
+```
+README.md                  index of every report and recording
+runs/<start>-<exit>-<profile>/      one recording (one run × one exit)
+reports/<start>-<exits>-<profiles>/ one report over one or more recordings
+```
+
+Each folder has `README.md` and `charts/*.svg`, which GitHub renders on
+the web and in its app, plus `report.html` (the same report as one page).
+Recordings also keep `result.json` and `provenance.json`.
+
+`results push` adds the given runs' recordings and one report over all of
+them: one line per exit in the overview chart, and error bars (min to max
+around the mean) where the same exit, network, profile and client package
+were recorded more than once. Other commands:
+
+```bash
+./gnosis_vpn-bench results combine REC1 REC2 ... [--title T]   # report over recordings already in the repo
+./gnosis_vpn-bench results link REPORT "Claude app" https://claude.ai/artifact/…
+./gnosis_vpn-bench results rebuild                             # regenerate every page after a renderer change
+```
+
+Every command scans all generated files and refuses private keys, tokens
+and VM or other public IP addresses. It refuses public repositories and
+asks before writing, committing and pushing. It never creates the results
 repository; create it on GitHub as **private** yourself.
 
 ## Status at any time

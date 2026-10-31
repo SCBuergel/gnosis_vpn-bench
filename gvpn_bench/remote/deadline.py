@@ -57,9 +57,7 @@ def schedule(run: Run) -> str:
     )
     if completed.returncode != 0:
         raise RuntimeError(f"cannot schedule the deletion timer: {completed.stderr.strip()}")
-    write_private_json(
-        run.state / "deadline-timer.json", {"unit": unit, "seconds": seconds, "set_at": utc_now()}
-    )
+    write_private_json(run.state / "deadline-timer.json", {"unit": unit, "seconds": seconds, "set_at": utc_now()})
     log.info("deletion timer %s fires in %d s", unit, seconds)
     return unit
 

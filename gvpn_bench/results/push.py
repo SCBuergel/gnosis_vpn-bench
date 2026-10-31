@@ -1,13 +1,11 @@
-"""Publish a run's results to the separate, private results repository.
+"""Safety checks and git plumbing for the private results repository.
 
-``results push RUN`` copies an allowlist of files into a local checkout of
-the results repo at ``runs/<YYYY-MM-DD>-<HHMMSS>Z-<target>-<profile>/``, scans them,
-commits, and pushes after asking.
+``publish.py`` decides what is written (only generated reports and the
+result data, never logs, run state, inventories, SSH keys or identity
+backups). This module scans that content, checks the repository and
+commits.
 
-Only ``result.json``, ``report.html`` and ``provenance.json`` are ever
-copied. Never logs, run state, inventories, SSH keys or identity backups.
-
-The scan refuses to commit if any copied file contains:
+The scan refuses to write if any file contains:
 
 * a PEM private key block, or a JSON key named like a private key;
 * a 0x-prefixed 32-byte hex value (the shape of an Ethereum private key);
@@ -25,7 +23,6 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
-import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -33,14 +30,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-ALLOWLIST = ("result.json", "report.html", "provenance.json")
 ALLOWED_PUBLIC_IPS = {"9.9.9.9", "1.1.1.1", "8.8.8.8", "149.112.112.112", "1.0.0.1", "8.8.4.4"}
 
 _PEM_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 _KEY_NAME = re.compile(r'"(private_key|chain_key|packet_key|secret|password|mnemonic)"\s*:', re.I)
-_HEX32 = re.compile(r"0x[0-9a-fA-F]{64}\b")
+# Lookarounds instead of \b: Markdown puts "_" (a word character) right
+# after italic text, which would hide a match from a \b boundary.
+_HEX32 = re.compile(r"0x[0-9a-fA-F]{64}(?![0-9a-fA-F])")
 _DO_TOKEN = re.compile(r"dop_v1_[A-Za-z0-9]+")
-_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 
 
 @dataclass
@@ -160,40 +158,14 @@ def check_results_repo(repo: Path) -> str:
     return remote
 
 
-@dataclass
-class PushPlan:
-    source: Path
-    repo: Path
-    destination: Path
-    files: list[Path]
-    scan: ScanResult
-
-
-def prepare(run_dir: Path, repo: Path) -> PushPlan:
-    result_file = run_dir / "result.json"
-    if not result_file.exists():
-        raise FileNotFoundError(f"{run_dir} has no result.json")
-    from .store import load_result
-
-    result = load_result(run_dir)
-    files = [run_dir / name for name in ALLOWLIST if (run_dir / name).exists()]
-    scan = scan_files(files, vm_ips_of(run_dir))
-    destination = repo / "runs" / destination_name(result)
-    return PushPlan(source=run_dir, repo=repo, destination=destination, files=files, scan=scan)
-
-
-def copy_and_commit(plan: PushPlan, message: str) -> bool:
-    """Copy the allowlisted files and commit. Returns False if nothing changed."""
-    if git(plan.repo, "diff", "--cached", "--name-only"):
-        raise RuntimeError(f"{plan.repo} already has staged changes; commit or unstage them first")
-    plan.destination.mkdir(parents=True, exist_ok=True)
-    for path in plan.files:
-        shutil.copyfile(path, plan.destination / path.name)
-    relative = plan.destination.relative_to(plan.repo)
-    git(plan.repo, "add", "--", *[str(relative / p.name) for p in plan.files])
-    if not git(plan.repo, "diff", "--cached", "--name-only"):
+def commit(repo: Path, paths: list[str], message: str) -> bool:
+    """Stage exactly *paths* and commit. Returns False if nothing changed."""
+    if git(repo, "diff", "--cached", "--name-only"):
+        raise RuntimeError(f"{repo} already has staged changes; commit or unstage them first")
+    git(repo, "add", "--", *paths)
+    if not git(repo, "diff", "--cached", "--name-only"):
         return False
-    git(plan.repo, "commit", "-m", message)
+    git(repo, "commit", "-m", message)
     return True
 
 

@@ -71,9 +71,7 @@ def fake_w3(receipts=None, nonce=0):
 
 def test_pending_transaction_without_receipt_blocks_sending(run):
     journal = Journal(run)
-    journal.append(
-        {"hash": "0xaa", "sender": "0x1", "nonce": 4, "purpose": "fund:client1:wxhopr", "status": "pending"}
-    )
+    journal.append({"hash": "0xaa", "sender": "0x1", "nonce": 4, "purpose": "fund:client1:wxhopr", "status": "pending"})
     w3 = fake_w3(nonce=5)
     with pytest.raises(AmbiguousTransactionError, match="nonce used"):
         journal.reconcile(w3)

@@ -254,18 +254,14 @@ def _compute_locations_stats(samples: list[dict]) -> dict:
             s
             for s in connected
             if all(
-                s.get(k) is not None
-                for k in ("latency_ms", "download_mbits", "download_100mb_mbits", "upload_mbits")
+                s.get(k) is not None for k in ("latency_ms", "download_mbits", "download_100mb_mbits", "upload_mbits")
             )
         ]
     else:
         complete = [
             s
             for s in connected
-            if all(
-                s.get(k) is not None
-                for k in ("connect_time_s", "latency_ms", "download_mbits", "upload_mbits")
-            )
+            if all(s.get(k) is not None for k in ("connect_time_s", "latency_ms", "download_mbits", "upload_mbits"))
         ]
     colos = [s["cf_colo"] for s in complete if s.get("cf_colo")]
     return {
@@ -285,9 +281,7 @@ def _compute_locations_stats(samples: list[dict]) -> dict:
     }
 
 
-def _render_locations_report(
-    bl_samples, vpn_samples, bl_stats, vpn_stats, n_runs, warmup_s, wait_s, log_file
-):
+def _render_locations_report(bl_samples, vpn_samples, bl_stats, vpn_stats, n_runs, warmup_s, wait_s, log_file):
     now = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     L: list[str] = []
 
@@ -390,12 +384,9 @@ def cmd_locations(bench: Bench, args) -> None:
                 vpn_samples.append(_run_locations_single(bench, dest, upload_file, r, warmup_s, wait_s))
                 loc_order = list(dict.fromkeys(s["location_id"] for s in vpn_samples))
                 vpn_stats = [
-                    _compute_locations_stats([s for s in vpn_samples if s["location_id"] == lid])
-                    for lid in loc_order
+                    _compute_locations_stats([s for s in vpn_samples if s["location_id"] == lid]) for lid in loc_order
                 ]
-                flush_live(
-                    bench.live_file, _locations_live_payload(n_runs, bl, bl_stats, vpn_samples, vpn_stats)
-                )
+                flush_live(bench.live_file, _locations_live_payload(n_runs, bl, bl_stats, vpn_samples, vpn_stats))
                 if r < n_runs:
                     time.sleep(PAUSE_BETWEEN_RUNS_S)
             if i < len(destinations):
@@ -436,9 +427,7 @@ def cmd_repeated(bench: Bench, args) -> None:
             else:
                 log.info("Download %d: immediately after connect", i)
             speed = run_cf_download(bench.host, CF_DL_10MB, f"10MB-#{i}")
-            downloads.append(
-                {"run": i, "gap_before_s": 0 if i == 1 else REPEATED_GAP_S, "speed_mbits": speed}
-            )
+            downloads.append({"run": i, "gap_before_s": 0 if i == 1 else REPEATED_GAP_S, "speed_mbits": speed})
         speeds = [d["speed_mbits"] for d in downloads if d["speed_mbits"] is not None]
         return {
             "downloads": downloads,

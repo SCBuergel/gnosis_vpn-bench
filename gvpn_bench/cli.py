@@ -141,9 +141,7 @@ modes:
         help="Write live JSON results to FILE (updated after every test; locations/repeated/ramp/gap)",
     )
     where = parser.add_argument_group("where to run (default: this machine)")
-    where.add_argument(
-        "--ssh", metavar="[USER@]HOST", help="run every command on HOST over SSH instead of locally"
-    )
+    where.add_argument("--ssh", metavar="[USER@]HOST", help="run every command on HOST over SSH instead of locally")
     where.add_argument("--ssh-key", metavar="FILE", help="SSH identity file for --ssh")
     where.add_argument(
         "--run",
@@ -238,16 +236,13 @@ modes:
     p_plot.add_argument(
         "files",
         nargs="*",
-        help="recording files for the left y-axis (shorthand "
-        "for --left). All same-kind files share the axis.",
+        help="recording files for the left y-axis (shorthand for --left). All same-kind files share the axis.",
     )
     p_plot.add_argument(
         "--left",
         action="append",
         metavar="FILE",
-        help="add a file to the left y-axis (repeatable). "
-        "All left-axis files must be the same kind "
-        "(ping or curl).",
+        help="add a file to the left y-axis (repeatable). All left-axis files must be the same kind (ping or curl).",
     )
     p_plot.add_argument(
         "--right",
@@ -333,9 +328,7 @@ modes:
     p_plot.add_argument(
         "--height", type=int, default=DEFAULT_HEIGHT, help=f"SVG height in pixels (default: {DEFAULT_HEIGHT})"
     )
-    p_plot.add_argument(
-        "--png-scale", type=float, default=1.0, help="PNG dimension multiplier (default: 1.0)"
-    )
+    p_plot.add_argument("--png-scale", type=float, default=1.0, help="PNG dimension multiplier (default: 1.0)")
     p_plot.add_argument(
         "--style",
         action="append",
@@ -343,9 +336,7 @@ modes:
         metavar="STYLE",
         help="matplotlib-style format string per series (e.g. --style xb --style or)",
     )
-    p_plot.add_argument(
-        "--legend", action="append", default=None, metavar="LABEL", help="legend entry per series"
-    )
+    p_plot.add_argument("--legend", action="append", default=None, metavar="LABEL", help="legend entry per series")
     p_plot.add_argument(
         "--title",
         default=None,
@@ -376,9 +367,7 @@ modes:
         default=DEFAULT_PING_LOAD_INTERVAL_MIN,
         help=f"minutes between curl bursts (default: {DEFAULT_PING_LOAD_INTERVAL_MIN})",
     )
-    p_pl.add_argument(
-        "--ping-output", default=None, help="ping recording path (default: data/ping--TIMESTAMP.txt)"
-    )
+    p_pl.add_argument("--ping-output", default=None, help="ping recording path (default: data/ping--TIMESTAMP.txt)")
     p_pl.add_argument(
         "--speed-output",
         default=None,

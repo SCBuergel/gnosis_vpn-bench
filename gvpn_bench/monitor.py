@@ -262,9 +262,7 @@ def summarize_burst(samples, outlier_sigma=DEFAULT_BOX_OUTLIER_SIGMA):
         # samples ended up being flagged.
         "t_start": ts_all_sorted[0],
         "t_center": (
-            ts_all_sorted[n_all // 2]
-            if n_all % 2
-            else (ts_all_sorted[n_all // 2 - 1] + ts_all_sorted[n_all // 2]) / 2
+            ts_all_sorted[n_all // 2] if n_all % 2 else (ts_all_sorted[n_all // 2 - 1] + ts_all_sorted[n_all // 2]) / 2
         ),
         "min": inlier_vs_sorted[0],
         "max": inlier_vs_sorted[-1],
@@ -759,13 +757,9 @@ class Plot:
             out.append(f'<line x1="{px}" y1="{bottom}" x2="{px}" y2="{bottom + 4}" stroke="black"/>')
             dt = datetime.fromtimestamp(t)
             if time_fmt is None:
-                out.append(
-                    f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">{dt.strftime("%Y-%m-%d")}</text>'
-                )
+                out.append(f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">{dt.strftime("%Y-%m-%d")}</text>')
             else:
-                out.append(
-                    f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">{dt.strftime(time_fmt)}</text>'
-                )
+                out.append(f'<text x="{px}" y="{bottom + 18}" text-anchor="middle">{dt.strftime(time_fmt)}</text>')
                 if show_date_row and d != prev_date:
                     out.append(
                         f'<text x="{px}" y="{bottom + 18 + FONT_SIZE + 2}" '
@@ -797,14 +791,12 @@ class Plot:
                 out.append(f'<line x1="{left - 4}" y1="{py}" x2="{left}" y2="{py}" stroke="{color}"/>')
                 out.append(f'<line x1="{left}" y1="{py}" x2="{right}" y2="{py}" stroke="#eee"/>')
                 out.append(
-                    f'<text x="{left - 6}" y="{py + 4}" text-anchor="end" '
-                    f'fill="{color}">{axis.format(v)}</text>'
+                    f'<text x="{left - 6}" y="{py + 4}" text-anchor="end" fill="{color}">{axis.format(v)}</text>'
                 )
             else:
                 out.append(f'<line x1="{right}" y1="{py}" x2="{right + 4}" y2="{py}" stroke="{color}"/>')
                 out.append(
-                    f'<text x="{right + 6}" y="{py + 4}" text-anchor="start" '
-                    f'fill="{color}">{axis.format(v)}</text>'
+                    f'<text x="{right + 6}" y="{py + 4}" text-anchor="start" fill="{color}">{axis.format(v)}</text>'
                 )
 
         cy = (MARGIN_TOP + self.height - MARGIN_BOTTOM) / 2
@@ -906,9 +898,7 @@ class Plot:
                     out.append(f"<line {' '.join(attrs)}/>")
                 if marker is not None:
                     mx = (sample_x0 + sample_x1) / 2
-                    out.append(
-                        f'<use href="{MARKER_HREFS[marker]}" x="{mx:.1f}" y="{cy:.1f}" color="{color}"/>'
-                    )
+                    out.append(f'<use href="{MARKER_HREFS[marker]}" x="{mx:.1f}" y="{cy:.1f}" color="{color}"/>')
             out.append(
                 f'<text x="{sample_x1 + pad:.1f}" y="{cy + FONT_SIZE * 0.35:.1f}" '
                 f'fill="black">{_xml_escape(label)}</text>'
@@ -945,9 +935,7 @@ class Plot:
 
         return out
 
-    def boxes(
-        self, bursts, axis, color, kind, width_px=DEFAULT_BOX_WIDTH_PX, show_dots=False, show_labels=False
-    ):
+    def boxes(self, bursts, axis, color, kind, width_px=DEFAULT_BOX_WIDTH_PX, show_dots=False, show_labels=False):
         """Draw one box per burst at ``b["t_center"]`` on the value axis.
 
         Anatomy per box (standard Tukey shape):
@@ -1039,8 +1027,7 @@ class Plot:
                 if not axis.is_visible(v):
                     continue
                 out.append(
-                    f'<use href="#m-star" x="{self.x_pixel(t):.1f}" '
-                    f'y="{self.y_pixel(v, axis):.1f}" color="{color}"/>'
+                    f'<use href="#m-star" x="{self.x_pixel(t):.1f}" y="{self.y_pixel(v, axis):.1f}" color="{color}"/>'
                 )
 
             if show_labels:
@@ -1056,9 +1043,7 @@ class Plot:
                 ]
                 label_x = x_right + 4
                 label_y = y_top + label_font
-                out.append(
-                    f'<text x="{label_x:.1f}" y="{label_y:.1f}" font-size="{label_font:.1f}" fill="{color}">'
-                )
+                out.append(f'<text x="{label_x:.1f}" y="{label_y:.1f}" font-size="{label_font:.1f}" fill="{color}">')
                 for i, ln in enumerate(lines):
                     dy = "0" if i == 0 else f"{label_line_h:.1f}"
                     out.append(f'<tspan x="{label_x:.1f}" dy="{dy}">{_xml_escape(ln)}</tspan>')
@@ -1115,8 +1100,7 @@ def render(
         kinds = {s.kind for s in group}
         if len(kinds) > 1:
             raise ValueError(
-                f"{side_name}-axis files must all be the same kind "
-                f"(all ping, or all curl); got {sorted(kinds)}"
+                f"{side_name}-axis files must all be the same kind (all ping, or all curl); got {sorted(kinds)}"
             )
 
     all_series = left_series + right_series
@@ -1193,8 +1177,7 @@ def render(
         if len(labels) != len(all_series):
             raise ValueError(f"got {len(labels)} legend labels for {len(all_series)} series")
         entries = [
-            (labels[i], parsed[i][2], parsed[i][0], parsed[i][1], all_series[i].mode)
-            for i in range(len(all_series))
+            (labels[i], parsed[i][2], parsed[i][0], parsed[i][1], all_series[i].mode) for i in range(len(all_series))
         ]
         out += plot.legend(entries)
 
@@ -1544,9 +1527,7 @@ def cmd_plot(bench, args):
             # "boxes → right" default.
             if right_series:
                 log.info(
-                    "routing: --boxes %s placed on LEFT axis "
-                    "(right axis already carries kind=%r, "
-                    "boxes kind=%r)",
+                    "routing: --boxes %s placed on LEFT axis (right axis already carries kind=%r, boxes kind=%r)",
                     path,
                     right_series[0].kind,
                     bs.kind,
@@ -1611,8 +1592,7 @@ def cmd_plot(bench, args):
         log.info("wrote %s", png)
     else:
         log.info(
-            "note: skipping PNG — install rsvg-convert (apt install librsvg2-bin), "
-            "imagemagick, or inkscape to enable."
+            "note: skipping PNG — install rsvg-convert (apt install librsvg2-bin), imagemagick, or inkscape to enable."
         )
 
 

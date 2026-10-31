@@ -6,7 +6,7 @@ import subprocess
 import pytest
 from sample_result import sample_result
 
-from gvpn_bench.results import push
+from gvpn_bench.results import publish, push
 from gvpn_bench.results.store import write_report, write_result
 
 
@@ -21,6 +21,13 @@ def make_run(tmp_path, result=None):
     return run_dir
 
 
+def git_repo(path):
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    for key, value in (("user.email", "t@example.com"), ("user.name", "t")):
+        subprocess.run(["git", "-C", str(path), "config", key, value], check=True)
+    return path
+
+
 def test_scan_flags_keys_tokens_and_ips():
     text = '{"private_key": "x", "t": "dop_v1_abc", "k": "0x' + "ab" * 32 + '", "ip": "203.0.113.9 46.4.1.1"}'
     problems = push.scan_text("f", text, {"203.0.113.9"})
@@ -30,26 +37,32 @@ def test_scan_flags_keys_tokens_and_ips():
     assert push.scan_text("f", "ping 9.9.9.9 via 172.30.0.1 sha " + "ab" * 32, set()) == []
 
 
-def test_prepare_copies_only_the_allowlist(tmp_path):
-    run_dir = make_run(tmp_path)
-    plan = push.prepare(run_dir, tmp_path / "repo")
-    assert sorted(p.name for p in plan.files) == sorted(push.ALLOWLIST)
-    assert plan.scan.clean, plan.scan.problems
-    assert plan.destination.name == "2026-11-01-123000Z-kaunas-v5-piz-palu-dev"
+def test_recording_folder_holds_only_generated_allowlisted_files(tmp_path):
+    staged = publish.stage_recording(make_run(tmp_path))
+    assert staged.folder == "runs/2026-11-01-123000Z-kaunas-v5-piz-palu-dev"
+    assert {"result.json", "provenance.json", "report.html", "README.md", "charts/overview.svg"} <= set(staged.files)
+    assert all(publish.ALLOWED.fullmatch(path) for path in staged.files)
+    assert not any("id_ed25519" in path or path.endswith(".log") for path in staged.files)
+    assert publish.scan([staged]) == []
 
 
-def test_vm_ip_in_result_is_refused(tmp_path):
+def test_vm_ip_anywhere_in_staged_files_is_refused(tmp_path):
     result = sample_result()
     result["run"]["notes"] = "client1 at 203.0.113.9"
-    plan = push.prepare(make_run(tmp_path, result), tmp_path / "repo")
-    assert not plan.scan.clean
+    staged = publish.stage_recording(make_run(tmp_path, result))
+    problems = publish.scan([staged])
+    assert any("VM IP 203.0.113.9" in p and "README.md" in p for p in problems)
+
+
+def test_unknown_file_name_is_refused():
+    staged = publish.Staged("runs/x", {"state/inventory.json": "{}"})
+    assert any("not an allowed file name" in p for p in publish.scan([staged]))
 
 
 def test_refuses_bench_repo_and_missing_checkout(tmp_path):
     with pytest.raises(RuntimeError, match="not a git checkout"):
         push.check_results_repo(tmp_path / "nothing")
-    repo = tmp_path / "bench"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    repo = git_repo(tmp_path / "bench")
     subprocess.run(
         ["git", "-C", str(repo), "remote", "add", "origin", "git@github.com:SCBuergel/gnosis_vpn-bench.git"],
         check=True,
@@ -58,35 +71,31 @@ def test_refuses_bench_repo_and_missing_checkout(tmp_path):
         push.check_results_repo(repo)
 
 
-def test_copy_and_commit_into_local_repo(tmp_path):
-    run_dir = make_run(tmp_path)
-    repo = tmp_path / "results"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    for key, value in (("user.email", "t@example.com"), ("user.name", "t")):
-        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
-    plan = push.prepare(run_dir, repo)
-    assert push.copy_and_commit(plan, "add")
-    tracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files"], capture_output=True, text=True
-    ).stdout.split()
-    assert sorted(tracked) == sorted(f"runs/{plan.destination.name}/{n}" for n in push.ALLOWLIST)
-    assert not push.copy_and_commit(plan, "again")
+def test_publish_writes_recording_report_and_index(tmp_path):
+    repo = git_repo(tmp_path / "results")
+    recording = publish.stage_recording(make_run(tmp_path))
+    from gvpn_bench.results.collection import Recording
 
-
-def test_github_slug():
-    assert push.github_slug("git@github.com:a/b.git") == "a/b"
-    assert push.github_slug("https://github.com/a/b") == "a/b"
-    assert push.github_slug("/srv/git/x") is None
+    member = Recording(recording.folder.split("/")[1], json.loads(recording.files["result.json"]))
+    report = publish.stage_report([member], links={"Claude app": "https://claude.ai/artifact/x"})
+    staged = [recording, report, publish.index_staged(repo, [recording, report])]
+    assert push.commit(repo, publish.write(repo, staged), "add")
+    tracked = set(subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True).stdout.split())
+    assert "README.md" in tracked
+    assert f"{recording.folder}/README.md" in tracked and f"{report.folder}/report.json" in tracked
+    index = (repo / "README.md").read_text()
+    assert recording.folder in index and "Claude app" in index and "42.5 / n/a" in index
+    assert not push.commit(repo, publish.write(repo, staged), "again")
+    rebuilt = publish.rebuild_all(repo)
+    assert {s.folder for s in rebuilt} == {recording.folder, report.folder}
 
 
 def test_refuses_repo_with_staged_changes(tmp_path):
-    run_dir = make_run(tmp_path)
-    repo = tmp_path / "results"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    repo = git_repo(tmp_path / "results")
     (repo / "other.txt").write_text("x")
     subprocess.run(["git", "-C", str(repo), "add", "other.txt"], check=True)
     with pytest.raises(RuntimeError, match="staged"):
-        push.copy_and_commit(push.prepare(run_dir, repo), "add")
+        push.commit(repo, ["other.txt"], "add")
 
 
 def test_vm_ips_found_from_a_target_result_dir(tmp_path):
@@ -99,7 +108,13 @@ def test_vm_ips_found_from_a_target_result_dir(tmp_path):
     result = sample_result()
     result["run"]["notes"] = "via 203.0.113.9"
     write_result(target_dir, result)
-    assert not push.prepare(target_dir, tmp_path / "repo").scan.clean
+    assert publish.scan([publish.stage_recording(target_dir)])
+
+
+def test_github_slug():
+    assert push.github_slug("git@github.com:a/b.git") == "a/b"
+    assert push.github_slug("https://github.com/a/b") == "a/b"
+    assert push.github_slug("/srv/git/x") is None
 
 
 def test_same_day_runs_get_separate_folders():
@@ -108,3 +123,49 @@ def test_same_day_runs_get_separate_folders():
     second["run"]["started_at"] = "2026-11-01T15:04:05Z"
     assert push.destination_name(first) != push.destination_name(second)
     assert push.destination_name(second) == "2026-11-01-150405Z-kaunas-v5-piz-palu-dev"
+
+
+def test_scan_sees_through_markdown_emphasis():
+    assert push.scan_text("README.md", "_note: client at 203.0.113.9_", {"203.0.113.9"})
+    assert push.scan_text("README.md", "_key 0x" + "ab" * 32 + "_", set())
+    assert push.scan_text("README.md", "**46.4.1.1**", set())
+
+
+def test_cli_push_two_locations_then_combine_and_link(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from gvpn_bench import runcli
+
+    repo = git_repo(tmp_path / "results")
+    monkeypatch.setattr(push, "check_results_repo", lambda repo: "origin")
+    monkeypatch.setattr(push, "push", lambda repo: None)
+    first = tmp_path / "nl"
+    second = tmp_path / "at"
+    first.mkdir()
+    second.mkdir()
+    write_result(first, sample_result())
+    other = sample_result()
+    other["run"]["started_at"] = "2026-11-01T13:00:00Z"
+    other["provenance"]["target"].update(
+        {"name": "austria-jura-prod", "label": "Austria", "exit_address": "0x210a14012535321b919653fdee8c2d5971b0e534"}
+    )
+    write_result(second, other)
+
+    def ns(**kw):
+        base = {"repo": str(repo), "dry_run": False, "yes": True, "link": None, "title": None}
+        return argparse.Namespace(**{**base, **kw})
+
+    assert runcli.cmd_results_push(ns(run=[str(first), str(second)], report_name=None)) == 0
+    reports = list((repo / "reports").iterdir())
+    assert len(reports) == 1
+    meta = json.loads((reports[0] / "report.json").read_text())
+    assert len(meta["recordings"]) == 2
+    assert "Austria" in (reports[0] / "README.md").read_text()
+
+    names = meta["recordings"]
+    assert runcli.cmd_results_combine(ns(recordings=names, name="both-again", title="Both")) == 0
+    assert runcli.cmd_results_link(ns(report="both-again", label="Claude app", url="https://claude.ai/artifact/x")) == 0
+    assert "Claude app" in (repo / "README.md").read_text()
+    assert runcli.cmd_results_combine(ns(recordings=["missing"], name=None)) == 2
+    assert runcli.cmd_results_rebuild(ns()) == 0
+    capsys.readouterr()

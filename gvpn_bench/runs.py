@@ -310,9 +310,7 @@ def plan_run(
     targets = [load_target(name, root) for name in names]
     for target in targets:
         check_compatible(profile, target)
-    run_id = run_id or default_run_id(
-        profile_name, "_".join(names) if len(names) < 3 else f"{len(names)}exits"
-    )
+    run_id = run_id or default_run_id(profile_name, "_".join(names) if len(names) < 3 else f"{len(names)}exits")
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError(f"invalid run id {run_id!r}")
     configs = {t.client_config for t in targets if t.client_config is not None}

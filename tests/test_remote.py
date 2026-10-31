@@ -128,10 +128,7 @@ def test_deadline_deletes_when_backups_exist(run, tmp_path):
 
 def test_failure_classification():
     assert classify_failure({"x": "session rejected: UnacceptablePixParams"}) == "UnacceptablePixParams"
-    assert (
-        classify_failure({"log": ["Status(404, None), url: .../api/v1/clients/register"]})
-        == "http_404_register"
-    )
+    assert classify_failure({"log": ["Status(404, None), url: .../api/v1/clients/register"]}) == "http_404_register"
     assert classify_failure({"probe": {"last_error": "Request timed out"}}) == "control_timeout"
     assert classify_failure({}) == "timeout"
     log = "a\nWARN probe check failed check=Load\nb\nERROR UnacceptablePixParams\n"

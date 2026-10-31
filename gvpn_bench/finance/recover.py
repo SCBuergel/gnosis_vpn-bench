@@ -151,9 +151,7 @@ def _channel_id(w3: Any, node: str, peer: str) -> bytes:
 
 def first_funding_block(w3: Any, run: Run) -> int:
     journal = Journal(run).entries()
-    funding = [
-        e for e in journal if str(e.get("purpose", "")).startswith("fund:") and e["status"] == "confirmed"
-    ]
+    funding = [e for e in journal if str(e.get("purpose", "")).startswith("fund:") and e["status"] == "confirmed"]
     if not funding:
         raise RuntimeError("no confirmed funding transaction in the journal")
     return int(w3.eth.get_transaction_receipt(funding[0]["hash"])["blockNumber"]) - 10
@@ -161,9 +159,7 @@ def first_funding_block(w3: Any, run: Run) -> int:
 
 def initiate(w3: Any, run: Run, profile: Profile, balances: dict[str, dict[str, Any]]) -> dict[str, Any]:
     chain = load_chain(run, profile)
-    channels = w3.eth.contract(
-        address=w3.to_checksum_address(chain["contractAddresses"]["channels"]), abi=CHANNEL_ABI
-    )
+    channels = w3.eth.contract(address=w3.to_checksum_address(chain["contractAddresses"]["channels"]), abi=CHANNEL_ABI)
     journal = Journal(run)
     from_block = first_funding_block(w3, run)
     # A new initiation invalidates any earlier journal and cleanup record.
@@ -183,12 +179,8 @@ def initiate(w3: Any, run: Run, profile: Profile, balances: dict[str, dict[str, 
             channel_id = _channel_id(w3, node, peer)
             state = channels.functions.channels(channel_id).call()
             if state[4] == CHANNEL_OPEN:
-                data = channels.functions.initiateOutgoingChannelClosureSafe(
-                    node, peer
-                )._encode_transaction_data()
-                journal.send(
-                    w3, owner, f"close:{client}:{peer}", safe_call(w3, safe, owner, channels.address, data)
-                )
+                data = channels.functions.initiateOutgoingChannelClosureSafe(node, peer)._encode_transaction_data()
+                journal.send(w3, owner, f"close:{client}:{peer}", safe_call(w3, safe, owner, channels.address, data))
                 state = channels.functions.channels(channel_id).call()
             if state[4] == CHANNEL_PENDING:
                 pending.append({"peer": peer, "closure_time": state[2]})
@@ -215,10 +207,7 @@ def load_recovery(run: Run, profile: Profile, clients: list[str]) -> dict[str, A
         raise ValueError("recovery journal must contain every client of this run")
     expected = chain["contractAddresses"]["channels"].lower()
     for client, entry in result.items():
-        if (
-            entry.get("network") != chain["network"]
-            or str(entry.get("channels_contract", "")).lower() != expected
-        ):
+        if entry.get("network") != chain["network"] or str(entry.get("channels_contract", "")).lower() != expected:
             raise ValueError(f"{client}: recovery journal does not match the pinned network")
         if not isinstance(entry.get("pending"), list) or not isinstance(entry.get("from_block"), int):
             raise ValueError(f"{client}: recovery journal is incomplete")
@@ -238,9 +227,7 @@ def recovery_digest(run: Run) -> str:
 
 
 def verify_channels_closed(w3: Any, channels: Any, entry: dict[str, Any]) -> None:
-    peers = {c["peer"] for c in entry["pending"]} | _opened_peers(
-        w3, channels, entry["node"], entry["from_block"]
-    )
+    peers = {c["peer"] for c in entry["pending"]} | _opened_peers(w3, channels, entry["node"], entry["from_block"])
     for peer in peers:
         state = channels.functions.channels(_channel_id(w3, entry["node"], peer)).call()
         if state[4] != CHANNEL_CLOSED or state[0] != 0:
@@ -250,9 +237,7 @@ def verify_channels_closed(w3: Any, channels: Any, entry: dict[str, Any]) -> Non
 def finalize(w3: Any, run: Run, profile: Profile, clients: list[str], destination: str) -> dict[str, Any]:
     chain = load_chain(run, profile)
     result = load_recovery(run, profile, clients)
-    channels = w3.eth.contract(
-        address=w3.to_checksum_address(chain["contractAddresses"]["channels"]), abi=CHANNEL_ABI
-    )
+    channels = w3.eth.contract(address=w3.to_checksum_address(chain["contractAddresses"]["channels"]), abi=CHANNEL_ABI)
     token = token_contract(w3)
     journal = Journal(run)
     (run.state / "cleanup.json").unlink(missing_ok=True)
@@ -280,9 +265,7 @@ def finalize(w3: Any, run: Run, profile: Profile, clients: list[str], destinatio
             journal.send(w3, owner, f"return:{client}:safe-wxhopr", call)
         node_tokens = token.functions.balanceOf(owner.address).call()
         if node_tokens:
-            journal.send(
-                w3, owner, f"return:{client}:node-wxhopr", token.functions.transfer(destination, node_tokens)
-            )
+            journal.send(w3, owner, f"return:{client}:node-wxhopr", token.functions.transfer(destination, node_tokens))
         safe_native = w3.eth.get_balance(entry["safe"])
         if safe_native:
             call = safe_call(w3, entry["safe"], owner, destination, value=safe_native)
@@ -352,9 +335,7 @@ def audit_returns(w3: Any, run: Run, result: dict[str, Any], destination: str) -
 # -- phase 3: verify before deleting VMs -------------------------------------------
 
 
-def verify_for_destroy(
-    w3: Any, run: Run, profile: Profile, clients: list[str], droplet_ids: list[int]
-) -> None:
+def verify_for_destroy(w3: Any, run: Run, profile: Profile, clients: list[str], droplet_ids: list[int]) -> None:
     """Raise unless the chain still matches what ``finalize`` recorded."""
     cleanup_file = run.state / "cleanup.json"
     if not cleanup_file.exists():
@@ -372,12 +353,8 @@ def verify_for_destroy(
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
-        raise RuntimeError(
-            f"cleanup record does not match this run ({', '.join(failed)}); refusing to delete"
-        )
-    channels = w3.eth.contract(
-        address=w3.to_checksum_address(chain["contractAddresses"]["channels"]), abi=CHANNEL_ABI
-    )
+        raise RuntimeError(f"cleanup record does not match this run ({', '.join(failed)}); refusing to delete")
+    channels = w3.eth.contract(address=w3.to_checksum_address(chain["contractAddresses"]["channels"]), abi=CHANNEL_ABI)
     token = token_contract(w3)
     for client, entry in result.items():
         if node_account(run, client).address.lower() != entry["node"].lower():

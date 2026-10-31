@@ -45,9 +45,7 @@ def require_web3() -> Any:
     return web3
 
 
-def fn(
-    name: str, inputs: tuple[str, ...] = (), outputs: tuple[str, ...] = (), mutability: str = "nonpayable"
-):
+def fn(name: str, inputs: tuple[str, ...] = (), outputs: tuple[str, ...] = (), mutability: str = "nonpayable"):
     return {
         "type": "function",
         "name": name,
@@ -225,25 +223,20 @@ class Journal:
         self._rewrite(entries)
         if unresolved:
             raise AmbiguousTransactionError(
-                "unresolved transactions; check them on a block explorer before retrying: "
-                + "; ".join(unresolved)
+                "unresolved transactions; check them on a block explorer before retrying: " + "; ".join(unresolved)
             )
 
     def required_nonce(self, sender: str) -> int | None:
         """The nonce the next send from *sender* must use, if a dropped entry pins it."""
         dropped = [
-            e["nonce"]
-            for e in self.entries()
-            if e["status"] == "dropped" and e["sender"].lower() == sender.lower()
+            e["nonce"] for e in self.entries() if e["status"] == "dropped" and e["sender"].lower() == sender.lower()
         ]
         return min(dropped) if dropped else None
 
     def confirmed(self, purpose: str) -> bool:
         return any(e.get("purpose") == purpose and e["status"] == "confirmed" for e in self.entries())
 
-    def send(
-        self, w3: Any, account: Any, purpose: str, call: Any = None, to: str | None = None, value: int = 0
-    ):
+    def send(self, w3: Any, account: Any, purpose: str, call: Any = None, to: str | None = None, value: int = 0):
         """Sign, journal, broadcast, wait. Raises on revert or ambiguity."""
         self.reconcile(w3)
         nonce = w3.eth.get_transaction_count(account.address, "pending")
@@ -331,9 +324,7 @@ def fund_nodes(w3: Any, run: Run, source: FundingSource, nodes: list[dict[str, s
         ):
             raise RuntimeError(f"{node['name']} already holds funds this run did not send; reconcile first")
         if not journal.confirmed(token_purpose):
-            data = token.functions.transfer(
-                address, w3.to_wei(node["wxhopr"], "ether")
-            )._encode_transaction_data()
+            data = token.functions.transfer(address, w3.to_wei(node["wxhopr"], "ether"))._encode_transaction_data()
             journal.send(
                 w3,
                 source.account,
