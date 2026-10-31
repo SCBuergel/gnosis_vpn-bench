@@ -1,12 +1,20 @@
-description = "Experimental channel on piz-palu-prod, per-user worker. NOT PINNED: provisioning refuses until version, url and sha256 are filled in."
+description = "Experimental 2026.10.31 build on piz-palu-prod, per-user worker"
 network = "piz-palu-prod"
 
 [package]
 channel = "experimental"
-# version = ""
-# url = ""
-# sha256 = ""
+version = "2026.10.31+build.020203.experimental"
+url = "https://download.gnosisvpn.io/linux/apt/pool/experimental/g/gnosisvpn/gnosisvpn_2026.10.31+build.020203.experimental_amd64.deb"
+sha256 = "65754c81b3ce707a59abe43ef6fa2600b7be9b96b5cd30bd01462157b97e4bd6"
 
 [worker]
 model = "v5-user"
 user = "gvpnbench"
+
+# Same socket buffers as v4: they avoided netlink ENOBUFS during killswitch
+# setup on these VMs; harmless otherwise.
+[host.sysctl]
+"net.core.rmem_default" = 8388608
+"net.core.rmem_max" = 16777216
+"net.core.wmem_default" = 8388608
+"net.core.wmem_max" = 16777216

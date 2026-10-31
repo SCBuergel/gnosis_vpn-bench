@@ -93,9 +93,16 @@ def test_preflight_refuses_second_provision_and_unpinned_profile(run, tmp_path):
     save_inventory(run, [Machine("origin", "origin", 1, "c-2", "fra1", "now", "192.0.2.1")])
     with pytest.raises(RuntimeError, match="already has an inventory"):
         provision.preflight(run, run.config.profile())
+    import dataclasses
+
+    from gvpn_bench.profiles import PackagePin
+
     other = plan_run(user_config(tmp_path), "v5-piz-palu-prod", "serbia-piz-palu-prod", run_id="r2")
+    unpinned = dataclasses.replace(
+        other.config.profile(), package=PackagePin(channel="experimental", version=None, url=None, sha256=None)
+    )
     with pytest.raises(RuntimeError, match="no package pin"):
-        provision.preflight(other, other.config.profile())
+        provision.preflight(other, unpinned)
 
 
 def test_delete_refuses_untagged_droplet():

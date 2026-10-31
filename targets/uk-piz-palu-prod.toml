@@ -1,0 +1,6 @@
+label = "GVPN-UK-1"
+exit_address = "0x2598c0773e3fa07437de329737d3e1a18f272e8f"
+network = "piz-palu-prod"
+profile = "v5-piz-palu-prod"
+location = "United Kingdom"
+notes = "Announced as gvpn:exit on the piz-palu-prod indexer on 2026-10-31."

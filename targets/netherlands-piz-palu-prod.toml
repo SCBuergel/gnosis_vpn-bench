@@ -1,0 +1,6 @@
+label = "GVPN-NL-1"
+exit_address = "0xc9a0ab0f96608b4da489321003070fda0d45f4ac"
+network = "piz-palu-prod"
+profile = "v5-piz-palu-prod"
+location = "Netherlands"
+notes = "Announced as gvpn:exit on the piz-palu-prod indexer on 2026-10-31."
