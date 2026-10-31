@@ -10,7 +10,8 @@ Rules carried over from the ladder harness:
   the first one is an error (the identity changed under us);
 * validate a payment-state archive completely before replacing the last
   good copy;
-* v5 also keeps ``hopr.safe`` from the per-network cache: an identity
+* the Safe file (v4 ``gnosisvpn-hopr.safe``, v5 per-network ``hopr.safe``)
+  is backed up as soon as it exists (after funding): an identity
   without it can attach to the wrong Safe.
 """
 
@@ -70,12 +71,21 @@ def fetch_files(host: Host, paths: list[str]) -> dict[str, bytes]:
     return {name: base64.b64decode(data) for name, data in json.loads(result.stdout).items()}
 
 
-def backup_identity(user: UserConfig, run: Run, profile: Profile, host: Host) -> list[Path]:
+def backup_identity(
+    user: UserConfig, run: Run, profile: Profile, host: Host, *, require_safe: bool = False
+) -> list[Path]:
+    """Back up the key files (required) and the Safe file (once it exists).
+
+    Called before funding (only the keys exist) and again after connecting,
+    when the Safe file must have appeared (``require_safe``).
+    """
     worker = profile.worker
     network = profile.network.name
     wanted = [f"{worker.identity_dir(network)}/{name}" for name in worker.identity_files()]
-    safe_cache = worker.safe_cache_file(network)
-    files = fetch_files(host, wanted + ([safe_cache] if safe_cache else []))
+    safe_path = worker.safe_file(network)
+    files = fetch_files(host, [*wanted, safe_path])
+    if require_safe and Path(safe_path).name not in files:
+        raise RuntimeError(f"{host.name}: Safe file {safe_path} missing after funding")
     missing = set(worker.identity_files()) - set(files)
     if missing:
         raise RuntimeError(f"{host.name}: incomplete identity backup, missing {sorted(missing)}")

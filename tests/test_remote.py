@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import FakeHost as FakeHostFactory
 from conftest import ok
 from test_runs import user_config
 
@@ -59,6 +60,22 @@ def test_cloud_config_is_json_after_header():
     data = json.loads(body)
     assert data["ssh_authorized_keys"] == ["ssh-ed25519 AAAA test"]
     assert ["touch", provision.READY_MARKER] in data["runcmd"]
+    assert "chage" in json.dumps(data["bootcmd"])
+    assert "chage" not in json.dumps(data["runcmd"])
+
+
+def test_ready_probe_never_multiplexes(monkeypatch, tmp_path):
+    from gvpn_bench.host import CommandResult, SshHost
+
+    seen = []
+
+    def fake_run(self, argv, *, timeout_s=30, input_bytes=None):
+        seen.append(self.control_dir)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(SshHost, "run", fake_run)
+    provision.wait_ready(SshHost(name="h", address="192.0.2.1", control_dir=tmp_path))
+    assert seen == [None]
 
 
 def test_droplet_name_is_sanitised():
@@ -207,3 +224,35 @@ def test_install_script_takes_values_as_arguments():
 
 def test_fake_host_ok_helper_roundtrip():
     assert json.loads(ok({"a": 1}).stdout) == {"a": 1}
+
+
+def test_identity_backup_before_and_after_safe_exists(run, tmp_path):
+    import base64
+
+    from gvpn_bench.remote import backup
+    from gvpn_bench.runs import UserConfig
+
+    user = UserConfig(
+        runs_dir=tmp_path,
+        identity_backup_dir=tmp_path / "ids",
+        digitalocean_token_file=tmp_path / "t",
+        funding_key_file=tmp_path / "k",
+        results_repo=None,
+        source=None,
+    )
+    files = {"hopr.id": b"id", "hopr.pass": b"pw"}
+
+    def respond(argv, data):
+        return ok({name: base64.b64encode(v).decode() for name, v in files.items()})
+
+    host = FakeHostFactory(respond)
+    profile = run.config.profile()
+    saved = backup.backup_identity(user, run, profile, host)
+    assert sorted(p.name for p in saved) == ["hopr.id", "hopr.pass"]
+    with pytest.raises(RuntimeError, match="Safe file"):
+        backup.backup_identity(user, run, profile, host, require_safe=True)
+    files["hopr.safe"] = b"0xsafe"
+    assert len(backup.backup_identity(user, run, profile, host, require_safe=True)) == 3
+    files["hopr.id"] = b"changed"
+    with pytest.raises(RuntimeError, match="changed"):
+        backup.backup_identity(user, run, profile, host)

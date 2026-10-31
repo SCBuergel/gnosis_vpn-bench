@@ -39,11 +39,12 @@ def cmd_plan(args: argparse.Namespace) -> int:
         notes=args.notes,
     )
     profile = run.config.profile()
-    target = run.config.target()
+    targets = run.config.targets()
     print(f"Planned run {run.config.id}")
     print(f"  directory : {run.path}")
     print(f"  profile   : {profile.name} ({profile.worker.kind}, {profile.package.channel})")
-    print(f"  target    : {target.label} {target.exit_address} on {target.network}")
+    for target in targets:
+        print(f"  target    : {target.label} {target.exit_address} on {target.network}")
     if not profile.package.pinned:
         print("  WARNING   : profile has no package pin; provision will refuse until it is pinned")
     infra = run.config.infra

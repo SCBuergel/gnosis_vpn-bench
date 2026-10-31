@@ -166,6 +166,8 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
         pairs,
     )
     for outcome, (_entry, host) in zip(outcomes, pairs, strict=True):
+        # The Safe file exists once the funded node deployed its Safe.
+        backup_identity(user, run, profile, host, require_safe=outcome.status == "connected")
         if outcome.status == "connected":
             info = vpn_for(host, profile).ctl("balance", timeout_s=45).get("Balance", {}).get("Ok", {})
             if info.get("info"):

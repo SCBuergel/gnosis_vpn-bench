@@ -12,6 +12,7 @@ Order matters for safety:
 from __future__ import annotations
 
 import concurrent.futures
+import dataclasses
 import hashlib
 import json
 import logging
@@ -21,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ..host import Host, run_script, write_file
+from ..host import Host, SshHost, run_script, write_file
 from ..profiles import Profile
 from ..runs import Run, utc_now, write_private_json
 from . import deadline
@@ -41,11 +42,12 @@ def cloud_config(public_key: str) -> str:
     """cloud-init user data. JSON is valid YAML, so no text templating is needed."""
     config = {
         "ssh_authorized_keys": [public_key],
+        # DigitalOcean images force a root password change on first login, which
+        # makes non-interactive SSH fail. bootcmd runs before package installs.
+        "bootcmd": [["sh", "-c", 'chage -d "$(date +%F)" -M 99999 root']],
         "package_update": True,
         "packages": PACKAGES,
         "runcmd": [
-            # DigitalOcean images can force a root password change on first login.
-            ["sh", "-c", 'chage -d "$(date +%F)" -M 99999 root'],
             ["systemctl", "stop", "nginx"],
             ["systemctl", "enable", "--now", "chrony"],
             ["touch", READY_MARKER],
@@ -152,10 +154,16 @@ def wait_for_addresses(run: Run, api: Api, machines: list[Machine], timeout_s: f
             time.sleep(3)
 
 
-def wait_ready(host: Host, timeout_s: float = 600) -> None:
+def wait_ready(host: SshHost, timeout_s: float = 600) -> None:
+    """Poll for cloud-init's marker with fresh connections.
+
+    A multiplexed master opened while the root password was still expired
+    would keep that state for every later command, so probing never reuses one.
+    """
+    probe = dataclasses.replace(host, control_dir=None)
     deadline_at = time.monotonic() + timeout_s
     while time.monotonic() < deadline_at:
-        if host.run(["test", "-f", READY_MARKER], timeout_s=20).ok:
+        if probe.run(["test", "-f", READY_MARKER], timeout_s=20).ok:
             log.info("%s ready", host.name)
             return
         time.sleep(5)

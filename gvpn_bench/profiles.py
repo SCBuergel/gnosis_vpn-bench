@@ -85,14 +85,17 @@ class WorkerModel:
         return f"{self.home}/.local/share/gnosisvpn/networks/{network}"
 
     def identity_files(self) -> tuple[str, ...]:
+        """Key files in ``identity_dir``; they exist before funding."""
         if self.kind == "v4-root":
-            return ("gnosisvpn-hopr.id", "gnosisvpn-hopr.pass", "gnosisvpn-hopr.safe")
+            return ("gnosisvpn-hopr.id", "gnosisvpn-hopr.pass")
         return ("hopr.id", "hopr.pass")
 
-    def safe_cache_file(self, network: str) -> str | None:
-        """v5 caches the Safe address per network; it must travel with the identity."""
+    def safe_file(self, network: str) -> str:
+        """The node's Safe address file. It appears only once the Safe is deployed
+        (after funding) and must travel with the keys: an identity without it can
+        attach to the wrong Safe."""
         if self.kind == "v4-root":
-            return None
+            return "/var/lib/gnosisvpn/.config/gnosisvpn-hopr.safe"
         return f"{self.home}/.cache/gnosisvpn/networks/{network}/hopr.safe"
 
     def payment_dir(self, network: str) -> str | None:
