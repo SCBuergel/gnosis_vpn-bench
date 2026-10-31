@@ -107,6 +107,7 @@ Each rung:
 | `clients` | Client names in this rung |
 | `status` | `measured`, `failed` or `not_run` |
 | `failure_status` | From the fixed list; required unless `measured` |
+| `detail` | Optional; why an unmeasured rung has no data |
 | `total_mbps` | Sum of per-client overlap rates; `null` unless `measured` |
 | `overlap_s`, `start_skew_ms`, `gap_before_s` | Overlap length, spread of start times, actual gap since the previous rung |
 | `overlap_start`, `overlap_end` | Optional timestamps |

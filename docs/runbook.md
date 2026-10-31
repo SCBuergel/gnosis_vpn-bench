@@ -24,7 +24,7 @@ Check with `./gnosis_vpn-bench config`. It warns about credential files
 that group or others can read; fix them with `chmod 600`. The tool never
 moves them.
 
-For `fund` and `recover`, install the extra: `pip install '.[remote]'`.
+For `fund` and `recover`, install the extra: `pip install -e '.[remote]'`.
 
 ## 1. Plan
 
@@ -67,8 +67,10 @@ and asks before sending them from the funding Safe.
 
 Every transaction is journaled in `state/transactions.jsonl` before it is
 broadcast. If a transaction has no receipt (`AmbiguousTransactionError`),
-nothing more is sent. Look it up on a block explorer; rerunning reconciles
-it from its receipt and nonce. Funding never pays a node twice.
+nothing more is sent. Look it up on a block explorer, then rerun: a mined
+transaction is reconciled from its receipt, and one that never reached the
+network is marked dropped, because its nonce gets reused and only one of
+the two can execute. Funding never pays a node twice.
 
 ## 4. Connect
 

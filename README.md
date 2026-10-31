@@ -23,7 +23,7 @@ Local modes:
 
 Remote runs additionally need `ssh`, `ssh-keygen`, a user systemd instance
 (for the deletion timer), and for `fund`/`recover`:
-`pip install '.[remote]'` (web3). Credentials are read from the files named
+`pip install -e '.[remote]'` (web3). Credentials are read from the files named
 in `~/.config/gvpn-bench/config.toml`; see [the runbook](docs/runbook.md).
 
 ## Quick start
@@ -69,7 +69,8 @@ dashboard.  The file is written atomically (write-to-tmp + rename).
 `--dns auto` (default) rewrites `/etc/resolv.conf` to `1.1.1.1` only if a
 name lookup fails after connecting, and restores the original file at exit.
 `--dns always` is the old unconditional behaviour; `--dns never` leaves DNS
-alone. Remote VMs never get the rewrite.
+alone. With `--run`, DNS is never touched on the run's VMs, whatever
+`--dns` says; with `--ssh`, `--dns` applies to that host.
 
 ## Remote runs
 

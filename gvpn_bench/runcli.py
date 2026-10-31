@@ -280,11 +280,11 @@ def cmd_results_push(args: argparse.Namespace) -> int:
         print("Dry run: nothing copied, committed or pushed.")
         return 0
     remote = push.check_results_repo(repo)
+    if not confirm(f"Commit these files in {repo} and push to {remote}?", args.yes):
+        print("Nothing copied, committed or pushed.")
+        return 0
     if not push.copy_and_commit(plan, f"Add results {plan.destination.name}"):
         print("Nothing changed; no commit.")
-    if not confirm(f"Push {repo} to {remote}?", args.yes):
-        print("Committed locally, not pushed.")
-        return 0
     push.push(repo)
     print("Pushed.")
     return 0

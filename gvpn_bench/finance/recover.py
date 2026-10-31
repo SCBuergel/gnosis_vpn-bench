@@ -78,13 +78,29 @@ def halt_client(
     run: Run,
     profile: Profile,
     host: Host,
+    *,
+    vm_deleted: bool = False,
 ) -> dict[str, Any]:
-    """Snapshot balance, stop the worker and guards, back up payment state."""
+    """Snapshot balance, stop the worker and guards, back up payment state.
+
+    ``vm_deleted`` (the droplet is confirmed gone, e.g. after the deletion
+    timer) skips everything on the VM: the balance comes from the last
+    snapshot or the backed-up Safe info, and the payment-state backup is
+    the last good copy. Recovery then proceeds from local backups only.
+    """
     from ..remote.backup import backup_payment_state, manifest
     from ..remote.connect import vpn_for
     from ..remote.guards import stop_guards
 
     saved = run.state / f"{host.name}-balance-final.json"
+    if vm_deleted:
+        if not saved.exists():
+            info_file = manifest(run).get(host.name, {}).get("safe_info")
+            if not info_file:
+                raise RuntimeError(f"{host.name}: VM is gone and no Safe info was backed up")
+            write_private_json(saved, {"info": json.loads(Path(info_file).read_text()), "channels_out": []})
+        log.warning("%s: VM already deleted; recovering from local backups only", host.name)
+        return json.loads(saved.read_text())
     vpn = vpn_for(host, profile)
     balance: dict[str, Any] | None = None
     if not saved.exists():
@@ -100,7 +116,8 @@ def halt_client(
         write_private_json(saved, balance)
     for command in ("disconnect", "stop-client"):
         try:
-            vpn.ctl(command, timeout_s=45)
+            response = vpn.ctl(command, timeout_s=45)
+            log.info("%s: %s → %s", host.name, command, json.dumps(response)[:200])
         except CtlError as error:
             log.warning("%s: %s: %s", host.name, command, error)
     for argv in (["systemctl", "stop", "gnosisvpn"], ["systemctl", "mask", "gnosisvpn"]):

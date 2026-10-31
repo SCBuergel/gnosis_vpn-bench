@@ -175,6 +175,8 @@ def prepare(run_dir: Path, repo: Path) -> PushPlan:
 
 def copy_and_commit(plan: PushPlan, message: str) -> bool:
     """Copy the allowlisted files and commit. Returns False if nothing changed."""
+    if git(plan.repo, "diff", "--cached", "--name-only"):
+        raise RuntimeError(f"{plan.repo} already has staged changes; commit or unstage them first")
     plan.destination.mkdir(parents=True, exist_ok=True)
     for path in plan.files:
         shutil.copyfile(path, plan.destination / path.name)

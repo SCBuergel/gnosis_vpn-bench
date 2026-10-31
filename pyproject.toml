@@ -17,8 +17,10 @@ gnosis_vpn-bench = "gvpn_bench.cli:main"
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["gvpn_bench", "gvpn_bench.remote"]
+# Install editable (pip install -e '.[remote]'): profiles/, targets/,
+# networks.toml and client-configs/ are read from the checkout.
+[tool.setuptools.packages.find]
+include = ["gvpn_bench*"]
 
 [tool.setuptools.package-data]
 gvpn_bench = ["assets/*"]

@@ -130,7 +130,10 @@ def connect_client(
         )
     egress = host.run(["curl", "-4", "-fsS", "--max-time", "30", "https://api.ipify.org"], timeout_s=40)
     egress_ip = egress.stdout.strip() if egress.ok else None
-    if egress_ip is None or egress_ip == vm_ip:
+    if egress_ip is None:
+        detail = f"egress IP lookup through the tunnel failed: {egress.stderr.strip()[:200]}"
+        return ConnectOutcome(host.name, "error", detail, elapsed, destination)
+    if egress_ip == vm_ip:
         return ConnectOutcome(
             host.name, "route_bypass", "public IP unchanged by the VPN", elapsed, destination
         )

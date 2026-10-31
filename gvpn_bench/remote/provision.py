@@ -203,16 +203,23 @@ def prepare_client(run: Run, profile: Profile, host: Host) -> None:
     if not result.ok:
         raise RuntimeError(f"{host.name}: client install failed: {result.stderr.strip()[-400:]}")
     if run.config.client_config is not None and profile.client_config_path is not None:
-        write_file(host, profile.client_config_path, run.config.client_config.read_bytes(), mode="644")
+        payload = run.config.client_config.read_bytes()
+        write_file(host, profile.client_config_path, payload, mode="644")
+        write_private_json(
+            run.state / "client-config.json",
+            {"source": str(run.config.client_config), "sha256": hashlib.sha256(payload).hexdigest()},
+        )
         restarted = host.run(["systemctl", "restart", "gnosisvpn"], timeout_s=60)
         if not restarted.ok:
             raise RuntimeError(f"{host.name}: restart after config upload failed")
 
 
 def client_config_sha256(run: Run) -> str | None:
-    if run.config.client_config is None:
+    """Hash of the config actually uploaded (recorded at upload time)."""
+    record = run.state / "client-config.json"
+    if not record.exists():
         return None
-    return hashlib.sha256(run.config.client_config.read_bytes()).hexdigest()
+    return json.loads(record.read_text())["sha256"]
 
 
 def system_info(host: Host) -> dict[str, Any]:

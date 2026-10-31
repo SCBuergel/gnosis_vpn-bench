@@ -3,14 +3,17 @@
 The funding key never leaves this process. Every transaction is appended
 to ``state/transactions.jsonl`` *before* waiting for its receipt::
 
-    {"hash", "sender", "nonce", "purpose", "status": "pending"|"confirmed"|"reverted", "time"}
+    {"hash", "sender", "nonce", "purpose", "status", "time"}
 
-Before sending from an address, every pending entry for that address is
-reconciled against its receipt and the chain's nonce. If one is still
-unresolved (no receipt), nothing is sent: retrying an ambiguous
-transaction could pay twice.
+``status`` is pending, confirmed, reverted or dropped. Before sending,
+every pending entry is reconciled against its receipt and the chain's
+nonce. An entry without a receipt whose nonce is still unused and that
+the node does not know is ``dropped`` (never broadcast): the next
+transaction reuses its nonce, so at most one of them can execute.
+Anything else without a receipt stops all sending, because retrying an
+ambiguous transaction could pay twice.
 
-web3 is imported lazily (``pip install '.[remote]'``).
+web3 is imported lazily (``pip install -e '.[remote]'``).
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ def require_web3() -> Any:
     try:
         import web3
     except ImportError:
-        raise SystemExit("funding and recovery need web3: pip install '.[remote]'") from None
+        raise SystemExit("funding and recovery need web3: pip install -e '.[remote]'") from None
     return web3
 
 
@@ -140,6 +143,13 @@ def safe_call(w3: Any, safe_address: str, owner: Any, target: str, data: bytes =
     return call
 
 
+def _known_to_node(w3: Any, tx_hash: str) -> bool:
+    try:
+        return w3.eth.get_transaction(tx_hash) is not None
+    except Exception:  # web3 raises TransactionNotFound
+        return False
+
+
 class Journal:
     """Append-only transaction ledger with receipt/nonce reconciliation."""
 
@@ -167,7 +177,7 @@ class Journal:
         entries = self.entries()
         unresolved = []
         for entry in entries:
-            if entry["status"] != "pending":
+            if entry["status"] not in ("pending", "dropped"):
                 continue
             try:
                 receipt = w3.eth.get_transaction_receipt(entry["hash"])
@@ -177,9 +187,20 @@ class Journal:
                 entry["status"] = "confirmed" if receipt["status"] == 1 else "reverted"
                 entry["block"] = receipt["blockNumber"]
                 continue
+            if entry["status"] == "dropped":
+                continue
             confirmed_nonce = w3.eth.get_transaction_count(entry["sender"], "latest")
+            if confirmed_nonce <= entry["nonce"] and not _known_to_node(w3, entry["hash"]):
+                # Never broadcast (crash between journaling and sending) or
+                # dropped. Its nonce is still free, so the next transaction
+                # from this sender reuses it and makes this one invalid: it
+                # can no longer execute, and retrying cannot pay twice.
+                entry["status"] = "dropped"
+                continue
             reason = (
-                "nonce used by another transaction" if confirmed_nonce > entry["nonce"] else "no receipt yet"
+                "nonce used by another transaction"
+                if confirmed_nonce > entry["nonce"]
+                else "still in the mempool"
             )
             unresolved.append(f"{entry['hash']} ({entry.get('purpose')}, nonce {entry['nonce']}: {reason})")
         self._rewrite(entries)

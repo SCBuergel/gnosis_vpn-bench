@@ -93,15 +93,17 @@ def build_bench(args: argparse.Namespace, stamp: str, log_file: Path) -> Bench:
     host: Host = _ssh_host(args.ssh, args.ssh_key) if args.ssh else LocalHost()
     ctl_prefix = ["runuser", "-u", args.ctl_user, "--"] if args.ctl_user else []
     exit_address = args.exit
+    dns_mode = args.dns
     if args.run_ref:
         if not args.on:
             raise SystemExit("--run needs --on CLIENT (e.g. client1)")
         host, ctl_prefix, exit_address = _run_host(args)
+        dns_mode = "never"  # run VMs keep their resolver; see README
     if args.target:
         exit_address = load_target(args.target).exit_address
     return Bench(
         host=host,
-        vpn=VpnClient(host=host, ctl_prefix=ctl_prefix, dns_mode=args.dns),
+        vpn=VpnClient(host=host, ctl_prefix=ctl_prefix, dns_mode=dns_mode),
         out_dir=LOG_DIR,
         stamp=stamp,
         log_file=log_file,

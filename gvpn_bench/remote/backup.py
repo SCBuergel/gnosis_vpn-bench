@@ -22,6 +22,7 @@ import io
 import json
 import os
 import tarfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -130,11 +131,16 @@ def save_safe_info(user: UserConfig, run: Run, profile: Profile, client: str, in
     _record(run, client, safe_info=str(target))
 
 
+_MANIFEST_LOCK = threading.Lock()
+
+
 def _record(run: Run, client: str, **fields: Any) -> None:
-    manifest_file = run.state / "backups.json"
-    manifest = json.loads(manifest_file.read_text()) if manifest_file.exists() else {}
-    manifest.setdefault(client, {}).update(fields)
-    write_private_json(manifest_file, manifest)
+    """Update one client's entry; clients back up in parallel threads."""
+    with _MANIFEST_LOCK:
+        manifest_file = run.state / "backups.json"
+        manifest = json.loads(manifest_file.read_text()) if manifest_file.exists() else {}
+        manifest.setdefault(client, {}).update(fields)
+        write_private_json(manifest_file, manifest)
 
 
 def manifest(run: Run) -> dict[str, Any]:

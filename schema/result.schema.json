@@ -793,6 +793,10 @@
               "ping_loss_pct"
             ]
           }
+        },
+        "detail": {
+          "type": "string",
+          "description": "Why an unmeasured rung has no data (optional)."
         }
       },
       "required": [

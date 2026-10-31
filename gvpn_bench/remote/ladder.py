@@ -80,14 +80,16 @@ def launch(host: Host, spec: LadderSpec, attempt: str, rung: int, start_at: floa
         raise RuntimeError(f"{host.name}: cannot start rung {rung}: {started.stderr.strip()[:200]}")
 
 
-def collect(host: Host, attempt: str, rung: int, give_up_at: float) -> dict[str, Any]:
+def collect(host: Host, attempt: str, rung: int, give_up_at: float) -> dict[str, Any] | None:
+    """The agent's result.json, or None if it never appeared (agent failed, SSH lost)."""
     path = f"{remote_dir(attempt, rung)}/result.json"
     while time.time() < give_up_at:
         try:
             return json.loads(read_file(host, path, timeout_s=15))
         except (RuntimeError, ValueError):
             time.sleep(0.5)
-    raise TimeoutError(f"{host.name}: rung {rung} result unavailable")
+    log.error("%s: rung %d result unavailable", host.name, rung)
+    return None
 
 
 def fetch_pings(host: Host, attempt: str, rung: int) -> list[dict[str, Any]] | None:
@@ -100,12 +102,13 @@ def fetch_pings(host: Host, attempt: str, rung: int) -> list[dict[str, Any]] | N
     return None
 
 
-def empty_rung(rung: int, clients: list[str], status: str, failure: str) -> dict[str, Any]:
+def empty_rung(rung: int, clients: list[str], status: str, failure: str, detail: str = "") -> dict[str, Any]:
     return {
         "rung": rung,
         "clients": clients,
         "status": status,
         "failure_status": failure,
+        "detail": detail,
         "total_mbps": None,
         "overlap_s": None,
         "start_skew_ms": None,
@@ -124,7 +127,7 @@ def rung_entry(
     try:
         summary = summarize(raw)
     except NoOverlapError:
-        return empty_rung(rung, clients, "failed", "no_overlap")
+        return empty_rung(rung, clients, "failed", "no_overlap", "transfers share no common interval")
     per_client = []
     for name in clients:
         metrics = summary["clients"][name]
@@ -156,6 +159,7 @@ def rung_entry(
         "gap_before_s": round(gap_before_s, 3) if gap_before_s is not None else None,
         "overlap_start": None,
         "overlap_end": None,
+        "detail": "",
         "per_client": per_client,
     }
 
@@ -180,24 +184,36 @@ def run_ladder(
         if any(r["status"] != "measured" for r in rungs):
             rungs.append(empty_rung(rung, names, "not_run", "not_run"))
             continue
-        connected = parallel(partial(still_connected, profile=profile, target=target), client_hosts)
+        connected = parallel(partial(still_connected, profile=profile, target=target), hosts)
         if not all(connected.values()):
             lost = ", ".join(n for n, ok in connected.items() if not ok)
             log.error("rung %d: not connected to the target: %s", rung, lost)
-            rungs.append(empty_rung(rung, names, "failed", "timeout"))
+            rungs.append(empty_rung(rung, names, "failed", "timeout", f"not connected to the target: {lost}"))
             continue
         start_at = next_start if next_start is not None else time.time() + FIRST_RUNG_LEAD_S
         if start_at - time.time() < MIN_LEAD_S:
-            rungs.append(empty_rung(rung, names, "failed", "error"))
             log.error("rung %d: too late to keep the %ss gap", rung, spec.gap_s)
+            rungs.append(empty_rung(rung, names, "failed", "error", "too late to keep the inter-rung gap"))
             continue
-        parallel(
-            partial(launch, spec=spec, attempt=attempt, rung=rung, start_at=start_at, origin_ip=origin_ip),
-            hosts,
-        )
+        try:
+            parallel(
+                partial(
+                    launch, spec=spec, attempt=attempt, rung=rung, start_at=start_at, origin_ip=origin_ip
+                ),
+                hosts,
+            )
+        except RuntimeError as error:
+            rungs.append(empty_rung(rung, names, "failed", "error", str(error)[:300]))
+            continue
         log.info("rung %d scheduled for %.3f with %s", rung, start_at, names)
         give_up = start_at + spec.deadline_s + COLLECT_GRACE_S
-        raw = parallel(partial(collect, attempt=attempt, rung=rung, give_up_at=give_up), hosts)
+        collected = parallel(partial(collect, attempt=attempt, rung=rung, give_up_at=give_up), hosts)
+        missing = [name for name, item in collected.items() if item is None]
+        if missing:
+            detail = f"no result from {', '.join(missing)} (agent failed or SSH lost)"
+            rungs.append(empty_rung(rung, names, "failed", "timeout", detail))
+            continue
+        raw = {name: item for name, item in collected.items() if item is not None}
         last_end = max(item["end"] for item in raw.values())
         if index + 1 < len(spec.rungs):
             next_start = last_end + spec.gap_s

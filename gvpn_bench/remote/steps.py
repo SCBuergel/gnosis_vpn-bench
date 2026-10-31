@@ -221,14 +221,15 @@ def step_recover_initiate(user: UserConfig, run: Run, profile: Profile) -> dict[
     from ..finance.wallet import connect_chain
 
     load_chain(run, profile)  # fail before touching any client if metadata is missing
-    pairs = client_hosts(run)
-    balances = dict(
-        zip(
-            [m.name for m, _ in pairs],
-            _parallel(lambda pair: halt_client(user, run, profile, pair[1]), pairs),
-            strict=True,
-        )
-    )
+    api = api_for(user)
+    pairs = [(m, host_for(run, m), api.get_droplet(m.id) is None) for m in clients(run)]
+    balances = {}
+    for (entry, _host, _gone), balance in zip(
+        pairs,
+        _parallel(lambda item: halt_client(user, run, profile, item[1], vm_deleted=item[2]), pairs),
+        strict=True,
+    ):
+        balances[entry.name] = balance
     guards.stop_heartbeat(run)
     return initiate(connect_chain(), run, profile, balances)
 
@@ -354,7 +355,7 @@ def build_result(run: Run, profile: Profile, target: Target) -> dict[str, Any]:
                         "scope": "rung",
                         "subject": f"rung {rung['rung']}",
                         "status": rung["failure_status"],
-                        "detail": "",
+                        "detail": rung.get("detail", ""),
                         "at": None,
                     }
                 )

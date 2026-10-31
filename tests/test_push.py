@@ -77,3 +77,13 @@ def test_github_slug():
     assert push.github_slug("git@github.com:a/b.git") == "a/b"
     assert push.github_slug("https://github.com/a/b") == "a/b"
     assert push.github_slug("/srv/git/x") is None
+
+
+def test_refuses_repo_with_staged_changes(tmp_path):
+    run_dir = make_run(tmp_path)
+    repo = tmp_path / "results"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "other.txt").write_text("x")
+    subprocess.run(["git", "-C", str(repo), "add", "other.txt"], check=True)
+    with pytest.raises(RuntimeError, match="staged"):
+        push.copy_and_commit(push.prepare(run_dir, repo), "add")
