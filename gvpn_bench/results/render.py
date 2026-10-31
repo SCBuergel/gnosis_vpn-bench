@@ -84,7 +84,7 @@ def rung_chart(rungs: list[dict[str, Any]]) -> str:
     for i in range(5):
         value = ymax * i / 4
         parts.append(f'<path d="M{left},{y(value):.1f} H{width - right}" stroke="var(--grid)"/>')
-        parts.append(f'<text x="{left - 8}" y="{y(value) + 4:.1f}" text-anchor="end">{value:.0f}</text>')
+        parts.append(f'<text x="{left - 8}" y="{y(value) + 4:.1f}" text-anchor="end">{value:.3g}</text>')
     parts.append(f'<text x="{left}" y="14">Mbit/s over the common overlap</text>')
     clients: list[str] = []
     for index, rung in enumerate(rungs):
@@ -145,7 +145,7 @@ def line_chart(title: str, unit: str, series: list[tuple[str, list[float], list[
     for i in range(5):
         value = ymax * i / 4
         parts.append(f'<path d="M{left},{py(value):.1f} H{width - right}" stroke="var(--grid)"/>')
-        parts.append(f'<text x="{left - 8}" y="{py(value) + 4:.1f}" text-anchor="end">{value:.0f}</text>')
+        parts.append(f'<text x="{left - 8}" y="{py(value) + 4:.1f}" text-anchor="end">{value:.3g}</text>')
     parts.append(f'<text x="{left}" y="14">{escape(title)} ({escape(unit)})</text>')
     parts.append(
         f'<text x="{width - right}" y="{height - 6}" text-anchor="end">seconds since scheduled start</text>'
@@ -185,8 +185,14 @@ def _concurrent_section(concurrent: dict[str, Any] | None) -> str:
         "common overlap, from the latest start to the earliest end; tails are excluded.</p>"
     )
     rungs = concurrent["rungs"]
-    if rungs:
+    if any(r["total_mbps"] is not None for r in rungs):
         out.append(rung_chart(rungs))
+    elif rungs:
+        reasons = sorted({r["failure_status"] for r in rungs if r["failure_status"]})
+        out.append(
+            f'<p class="warn"><strong>No rung was measured</strong> ({escape(", ".join(reasons))}). '
+            "There is no throughput to plot; this is missing data, not 0 Mbit/s.</p>"
+        )
     rows = []
     for rung in rungs:
         rows.append(
