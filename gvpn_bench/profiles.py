@@ -114,6 +114,7 @@ class Profile:
     package: PackagePin
     worker: WorkerModel
     description: str
+    client_config_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +187,7 @@ def load_profile(name: str, root: Path = CONFIG_ROOT) -> Profile:
         package=_package(data["package"]),
         worker=_worker(data["worker"]),
         description=str(data.get("description", "")),
+        client_config_path=data.get("client_config_path"),
     )
 
 

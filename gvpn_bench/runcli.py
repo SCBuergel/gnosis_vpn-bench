@@ -131,6 +131,126 @@ def cmd_config(args: argparse.Namespace) -> int:
     return status
 
 
+def _open(args: argparse.Namespace) -> tuple[Any, Run, Any, Any]:
+    user = load_user_config()
+    run = open_run(args.run, user)
+    return user, run, run.config.profile(), run.config.target()
+
+
+def cmd_provision(args: argparse.Namespace) -> int:
+    from .remote import provision as prov
+    from .remote import steps
+
+    user, run, profile, _target = _open(args)
+    prov.preflight(run, profile)
+    print(prov.describe_plan(run, profile))
+    if not confirm("Create these billable droplets?", args.yes):
+        return 1
+    steps.step_provision(user, run, profile)
+    print(f"Provisioned. Next: fund {run.config.id}")
+    return 0
+
+
+def cmd_fund(args: argparse.Namespace) -> int:
+    from .remote import steps
+
+    user, run, profile, _target = _open(args)
+    if run.done("fund"):
+        print("already funded")
+        return 0
+    plan = steps.step_fund_plan(user, run, profile)
+    print("Identities backed up. Funding requested by the clients:")
+    for node in plan["nodes"]:
+        print(f"  {node['name']}: {node['wxhopr']} wxHOPR + {node['xdai']} xDAI → {node['address']}")
+    print(f"From the funding Safe in {user.funding_key_file} on {profile.network.name}.")
+    if not confirm("Send these funds?", args.yes):
+        return 1
+    steps.step_fund_send(user, run, profile)
+    print(f"Funded. Next: connect {run.config.id}")
+    return 0
+
+
+def cmd_connect(args: argparse.Namespace) -> int:
+    from .remote import steps
+
+    user, run, profile, target = _open(args)
+    outcomes = steps.step_connect(user, run, profile, target)
+    for outcome in outcomes:
+        print(f"  {outcome.client}: {outcome.status} {outcome.detail}")
+    return 0 if all(o.status == "connected" for o in outcomes) else 1
+
+
+def cmd_ladder(args: argparse.Namespace) -> int:
+    from .remote import steps
+
+    _user, run, profile, target = _open(args)
+    rungs = steps.step_ladder(run, profile, target)
+    for rung in rungs:
+        value = (
+            rung["total_mbps"]
+            if rung["total_mbps"] is not None
+            else f"not measured ({rung['failure_status']})"
+        )
+        print(f"  rung {rung['rung']}: {value}")
+    steps.step_result(run, profile, target)
+    print(f"Wrote {run.result_file} and {run.report_file}")
+    return 0
+
+
+def cmd_sweep(args: argparse.Namespace) -> int:
+    from .remote import steps
+
+    _user, run, profile, target = _open(args)
+    rows = steps.step_sweep(run, profile, args.exit or None)
+    for row in rows:
+        print(f"  {row['exit_label']:<16} {row['status']:<22} {row['detail'] or ''}")
+    steps.step_result(run, profile, target)
+    print(f"Wrote {run.result_file} and {run.report_file}")
+    return 0
+
+
+def cmd_recover(args: argparse.Namespace) -> int:
+    from .remote import steps
+
+    user, run, profile, _target = _open(args)
+    if not (run.state / "funding.json").exists():
+        print("this run was never funded; nothing to recover")
+        return 0
+    from .finance.recover import recovery_complete
+    from .remote.inventory import clients
+
+    if not recovery_complete(run, profile, [m.name for m in clients(run)]):
+        print("This stops every client worker and guard, then starts closing all payment channels.")
+        if not confirm("Stop the clients and start recovery?", args.yes):
+            return 1
+        steps.step_recover_initiate(user, run, profile)
+    print("Finalizing: waits for the channel-closure grace period, then returns funds to the funding Safe.")
+    if not confirm("Send the return transactions?", args.yes):
+        return 1
+    cleanup = steps.step_recover_finalize(user, run, profile)
+    print(f"Recovered {cleanup['recovered_wxHOPR']} wxHOPR and {cleanup['recovered_xDAI']} xDAI.")
+    print(f"Next: destroy {run.config.id}")
+    return 0
+
+
+def cmd_destroy(args: argparse.Namespace) -> int:
+    from .remote import steps
+    from .remote.inventory import load_inventory
+
+    user, run, profile, _target = _open(args)
+    inventory = load_inventory(run)
+    if not inventory:
+        print("no droplets in this run's inventory")
+        return 0
+    for entry in inventory:
+        print(f"  {entry.name:<8} id {entry.id}")
+    if not confirm("Delete these droplets (after re-verifying recovered funds)?", args.yes):
+        return 1
+    steps.step_destroy(user, run, profile)
+    print("Deleted and verified gone.")
+    return 0
+
+
 def add_run_commands(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("plan", help="create a run directory with run.toml (no spending)")
     p.add_argument("--profile", required=True, help="profiles/<name>.toml")
@@ -151,3 +271,20 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser("config", help="show credential and run locations; check file modes")
     p.set_defaults(run_func=cmd_config)
+
+    remote_steps = [
+        ("provision", cmd_provision, "create and prepare the run's droplets (costs money)"),
+        ("fund", cmd_fund, "back up identities, then fund each client from the funding Safe"),
+        ("connect", cmd_connect, "start guards and heartbeat, baseline, connect every client to the target"),
+        ("ladder", cmd_ladder, "run the 1→2→3 concurrent ladder; writes result.json and report.html"),
+        ("sweep", cmd_sweep, "check every discovered exit once; writes result.json and report.html"),
+        ("recover", cmd_recover, "stop clients, close channels, return funds (moves funds)"),
+        ("destroy", cmd_destroy, "delete this run's droplets after re-verifying recovery"),
+    ]
+    for name, func, help_text in remote_steps:
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("run", help="run id or directory")
+        p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+        if name == "sweep":
+            p.add_argument("--exit", action="append", metavar="ADDRESS", help="only this exit (repeatable)")
+        p.set_defaults(run_func=func)

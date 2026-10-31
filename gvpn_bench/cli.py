@@ -76,10 +76,27 @@ def _ssh_host(destination: str, key: str | None) -> SshHost:
     )
 
 
+def _run_host(args: argparse.Namespace) -> tuple[Host, list[str], str]:
+    """Host, ctl prefix and target exit for ``--run RUN --on CLIENT``."""
+    from .remote.inventory import host_for, machine
+    from .runs import load_user_config, open_run
+
+    run = open_run(args.run_ref, load_user_config())
+    host = host_for(run, machine(run, args.on))
+    profile = run.config.profile()
+    return host, profile.worker.ctl_prefix(), run.config.target().exit_address
+
+
 def build_bench(args: argparse.Namespace, stamp: str, log_file: Path) -> Bench:
+    if args.run_ref and args.ssh:
+        raise SystemExit("use either --run/--on or --ssh, not both")
     host: Host = _ssh_host(args.ssh, args.ssh_key) if args.ssh else LocalHost()
     ctl_prefix = ["runuser", "-u", args.ctl_user, "--"] if args.ctl_user else []
     exit_address = args.exit
+    if args.run_ref:
+        if not args.on:
+            raise SystemExit("--run needs --on CLIENT (e.g. client1)")
+        host, ctl_prefix, exit_address = _run_host(args)
     if args.target:
         exit_address = load_target(args.target).exit_address
     return Bench(
@@ -126,6 +143,13 @@ modes:
         "--ssh", metavar="[USER@]HOST", help="run every command on HOST over SSH instead of locally"
     )
     where.add_argument("--ssh-key", metavar="FILE", help="SSH identity file for --ssh")
+    where.add_argument(
+        "--run",
+        metavar="RUN",
+        dest="run_ref",
+        help="run on a VM of this run (with --on); uses the run's profile and target exit",
+    )
+    where.add_argument("--on", metavar="CLIENT", help="machine name within --run, e.g. client1")
     where.add_argument(
         "--ctl-user",
         metavar="USER",
