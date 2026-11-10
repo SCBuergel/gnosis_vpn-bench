@@ -231,4 +231,7 @@ def delete_probes(api: ProbeApi, tag: str, ids: dict[str, int], poll_s: float) -
         left = sorted(known)
     if left:
         log.error("PROBE DROPLETS NOT DELETED: %s (tag %s); delete them in the DigitalOcean console", left, tag)
+    elif known:
+        # Also logged when the probe then fails, so every ending says what happened to the droplets.
+        log.warning("all probe droplets deleted (no droplet with tag %s is left)", tag)
     return left

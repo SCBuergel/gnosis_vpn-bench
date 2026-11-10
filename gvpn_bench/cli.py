@@ -125,7 +125,8 @@ def step_name(args: argparse.Namespace) -> str:
 def run_step(args: argparse.Namespace) -> int:
     """Run a step and always end with ``step <name> finished: exit <code>``.
 
-    Log watchers stop on that line, ``step destroy finished`` being a run's last.
+    Log watchers stop on that line: a run's last is ``step destroy finished``
+    when steps run one by one, or ``step execute finished`` for ``execute``.
     """
     code: int | str | None = 1
     try:

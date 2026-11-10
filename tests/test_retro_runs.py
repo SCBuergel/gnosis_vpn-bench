@@ -272,7 +272,7 @@ def _fake_key(directory):
     return key
 
 
-def test_probe_regions_deletes_a_droplet_whose_create_call_raised(tmp_path, monkeypatch):
+def test_probe_regions_deletes_a_droplet_whose_create_call_raised(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(probe, "make_key", lambda d: _fake_key(tmp_path))
     api = FakeApi()
     create = api.create_droplet
@@ -284,9 +284,10 @@ def test_probe_regions_deletes_a_droplet_whose_create_call_raised(tmp_path, monk
         return droplet
 
     api.create_droplet = flaky_create
-    with pytest.raises(TimeoutError):
+    with caplog.at_level("WARNING"), pytest.raises(TimeoutError):
         probe.probe_regions(api, "192.0.2.178", ["ams3", "lon1"], "t", tmp_path, host_factory=None, poll_s=0)
     assert api.droplets == {}
+    assert "all probe droplets deleted" in caplog.text
 
 
 def test_one_failing_region_keeps_the_others(tmp_path, monkeypatch):
