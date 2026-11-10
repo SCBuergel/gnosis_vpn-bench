@@ -513,6 +513,10 @@ def cmd_execute(args: argparse.Namespace) -> int:
 
     user, run, profile, _target = _open(args)
     targets = run.config.targets()
+    if not run.done("recover"):
+        from .finance import wallet
+
+        wallet.require_web3()  # before any droplet exists: funding and recovery need it
     if not run.done("provision"):
         prov.preflight(run, profile)
         print(prov.describe_plan(run, profile))
@@ -548,7 +552,8 @@ def cmd_execute(args: argparse.Namespace) -> int:
     except KeyboardInterrupt as error:
         failure = error
         print("Interrupted.")
-    except Exception as error:
+    except (Exception, SystemExit) as error:
+        # SystemExit too: a step that exits must not skip the push and teardown.
         failure = error
         print(f"FAILED: {type(error).__name__}: {error}")
     if any((run.path / "results").glob("*/result.json")):

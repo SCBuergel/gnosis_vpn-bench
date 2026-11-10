@@ -132,7 +132,8 @@ def run_step(args: argparse.Namespace) -> int:
     try:
         code = args.run_func(args)
     except SystemExit as error:
-        code = error.code
+        # sys.exit("message") carries a string, which means exit status 1.
+        code = error.code if isinstance(error.code, int) or error.code is None else 1
         raise
     finally:
         print(f"step {step_name(args)} finished: exit {code if code is not None else 0}", flush=True)

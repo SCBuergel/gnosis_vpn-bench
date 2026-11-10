@@ -73,6 +73,32 @@ def test_execute_tears_down_after_ctrl_c(faked):
     assert calls == ["teardown"]
 
 
+def test_execute_tears_down_after_a_step_exits(faked):
+    run, calls, monkeypatch = faked
+
+    def exits(*a, **k):
+        raise SystemExit("funding and recovery need web3")
+
+    monkeypatch.setattr(steps, "step_provision", exits)
+    assert runcli.cmd_execute(args(run)) == 1
+    assert calls == ["teardown"]
+
+
+def test_execute_checks_web3_before_creating_droplets(faked):
+    from gvpn_bench.finance import wallet
+
+    run, calls, monkeypatch = faked
+
+    def missing():
+        raise SystemExit("funding and recovery need web3")
+
+    monkeypatch.setattr(wallet, "require_web3", missing)
+    monkeypatch.setattr(steps, "step_provision", lambda *a, **k: calls.append("provision"))
+    with pytest.raises(SystemExit):
+        runcli.cmd_execute(args(run))
+    assert calls == []
+
+
 def test_execute_keep_skips_teardown(faked):
     run, calls, monkeypatch = faked
     monkeypatch.setattr(steps, "step_provision", lambda *a: (_ for _ in ()).throw(RuntimeError("x")))

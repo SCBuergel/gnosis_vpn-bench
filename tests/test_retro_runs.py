@@ -169,6 +169,13 @@ def test_every_step_ends_with_a_finished_line(capsys):
         cli.run_step(argparse.Namespace(run_func=cmd_results_push))
     assert "step results push finished: exit 1" in capsys.readouterr().out
 
+    def cmd_execute(args):
+        raise SystemExit("funding and recovery need web3")
+
+    with pytest.raises(SystemExit):
+        cli.run_step(argparse.Namespace(run_func=cmd_execute))
+    assert "step execute finished: exit 1" in capsys.readouterr().out
+
 
 # -- app copy -------------------------------------------------------------------------------
 
