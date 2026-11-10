@@ -102,6 +102,39 @@ def funding_requests(run: Run, profile: Profile, timeout_s: float = 300) -> list
     return nodes
 
 
+def capacity_preflight(user: UserConfig, run: Run, profile: Profile) -> list[str]:
+    """Check droplet headroom and funding before any droplet exists; one note per check.
+
+    Raises when a check fails. A check that cannot be made (a token without
+    account access, a profile without a funding estimate) is reported, not fatal.
+    """
+    clients = run.config.infra.clients
+    needed = clients + 1  # the clients and the origin
+    notes = []
+    headroom = api_for(user).droplet_headroom()
+    if headroom is None:
+        notes.append("droplet limit: unknown (the API token cannot read the account)")
+    elif headroom < needed:
+        raise RuntimeError(f"droplet limit: room for {headroom} more droplets, this run needs {needed}")
+    else:
+        notes.append(f"droplet limit: room for {headroom} more, this run needs {needed}")
+    estimate = profile.expected_funding
+    if estimate is None:
+        notes.append(f"funding: not checked (profile {profile.name} has no [funding] estimate)")
+        return notes
+    from ..finance.wallet import connect_chain, funding_shortfall, load_funding_source
+
+    w3 = connect_chain()
+    source = load_funding_source(user.funding_key_file)
+    tokens = clients * w3.to_wei(estimate.wxhopr, "ether")
+    native = clients * w3.to_wei(estimate.xdai, "ether")
+    problems = funding_shortfall(w3, source, tokens, native)
+    if problems:
+        raise RuntimeError(f"funding for {clients} clients: " + "; ".join(problems))
+    notes.append(f"funding: the Safe covers {clients} × ({estimate.wxhopr} wxHOPR + {estimate.xdai} xDAI)")
+    return notes
+
+
 def step_fund_plan(user: UserConfig, run: Run, profile: Profile) -> dict[str, Any]:
     """Read requests, pin chain metadata, back up identities. Moves no funds."""
     from ..finance.chain import pin_chain

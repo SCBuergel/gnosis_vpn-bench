@@ -164,7 +164,8 @@ def wait_ready(host: SshHost, timeout_s: float = 600) -> None:
     probe = dataclasses.replace(host, control_dir=None)
     deadline_at = time.monotonic() + timeout_s
     while time.monotonic() < deadline_at:
-        if probe.run(["test", "-f", READY_MARKER], timeout_s=20).ok:
+        # Refused connections and a missing marker are normal while the VM boots.
+        if probe.run(["test", "-f", READY_MARKER], timeout_s=20, expected_failure=True).ok:
             log.info("%s ready", host.name)
             return
         time.sleep(5)

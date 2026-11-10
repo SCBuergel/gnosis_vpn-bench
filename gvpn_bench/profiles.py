@@ -111,6 +111,14 @@ class WorkerModel:
 
 
 @dataclass(frozen=True)
+class FundingEstimate:
+    """What one client is expected to request, for checking capacity before provisioning."""
+
+    wxhopr: str
+    xdai: str
+
+
+@dataclass(frozen=True)
 class Profile:
     name: str
     network: Network
@@ -119,6 +127,7 @@ class Profile:
     description: str
     client_config_path: str | None = None
     sysctl: tuple[tuple[str, str], ...] = ()
+    expected_funding: FundingEstimate | None = None
 
 
 @dataclass(frozen=True)
@@ -208,7 +217,14 @@ def load_profile(name: str, root: Path = CONFIG_ROOT) -> Profile:
         description=str(data.get("description", "")),
         client_config_path=data.get("client_config_path"),
         sysctl=_sysctl(data.get("host", {}).get("sysctl", {})),
+        expected_funding=_funding_estimate(data.get("funding")),
     )
+
+
+def _funding_estimate(data: Any) -> FundingEstimate | None:
+    if data is None:
+        return None
+    return FundingEstimate(wxhopr=str(data["expected_wxhopr"]), xdai=str(data["expected_xdai"]))
 
 
 def load_target(name: str, root: Path = CONFIG_ROOT) -> Target:

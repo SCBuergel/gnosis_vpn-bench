@@ -327,26 +327,55 @@ def describe_source(w3: Any, source: FundingSource) -> dict[str, Any]:
     }
 
 
+def funding_shortfall(w3: Any, source: FundingSource, wxhopr_wei: int, xdai_wei: int) -> list[str]:
+    """What the funding Safe lacks for *wxhopr_wei* and *xdai_wei*; empty when it can pay both."""
+    held_tokens = token_contract(w3).functions.balanceOf(source.safe).call()
+    held_native = w3.eth.get_balance(source.safe)
+    problems = []
+    if held_tokens < wxhopr_wei:
+        problems.append(
+            f"the Safe holds {w3.from_wei(held_tokens, 'ether')} wxHOPR, needs {w3.from_wei(wxhopr_wei, 'ether')}"
+        )
+    if held_native < xdai_wei:
+        problems.append(
+            f"the Safe holds {w3.from_wei(held_native, 'ether')} xDAI, needs {w3.from_wei(xdai_wei, 'ether')}"
+        )
+    return problems
+
+
 def fund_nodes(w3: Any, run: Run, source: FundingSource, nodes: list[dict[str, str]]) -> None:
     """Send each node its recommended wxHOPR and xDAI from the funding Safe.
 
     Idempotent per (node, asset): a confirmed journal entry is skipped. A
     node that already holds funds without a matching journal entry is
     refused: something else funded it and we must not fund it twice.
+
+    Every check runs before the first transfer: a node with unexplained funds,
+    or a Safe that cannot pay every outstanding transfer, sends nothing at all,
+    so a run is never left with only some of its clients funded.
     """
     journal = Journal(run)
     journal.reconcile(w3)
     token = token_contract(w3)
+    tokens_due = 0
+    native_due = 0
+    for node in nodes:
+        address = w3.to_checksum_address(node["address"])
+        token_done = journal.confirmed(f"fund:{node['name']}:wxhopr")
+        native_done = journal.confirmed(f"fund:{node['name']}:xdai")
+        has_tokens = token.functions.balanceOf(address).call() > 0
+        has_native = w3.eth.get_balance(address) > 0
+        if (has_tokens and not token_done) or (has_native and not native_done):
+            raise RuntimeError(f"{node['name']} already holds funds this run did not send; reconcile first")
+        tokens_due += 0 if token_done else w3.to_wei(node["wxhopr"], "ether")
+        native_due += 0 if native_done else w3.to_wei(node["xdai"], "ether")
+    problems = funding_shortfall(w3, source, tokens_due, native_due)
+    if problems:
+        raise RuntimeError("funding Safe cannot pay every client, nothing sent: " + "; ".join(problems))
     for node in nodes:
         address = w3.to_checksum_address(node["address"])
         token_purpose = f"fund:{node['name']}:wxhopr"
         native_purpose = f"fund:{node['name']}:xdai"
-        has_tokens = token.functions.balanceOf(address).call() > 0
-        has_native = w3.eth.get_balance(address) > 0
-        if (has_tokens and not journal.confirmed(token_purpose)) or (
-            has_native and not journal.confirmed(native_purpose)
-        ):
-            raise RuntimeError(f"{node['name']} already holds funds this run did not send; reconcile first")
         if not journal.confirmed(token_purpose):
             data = token.functions.transfer(address, w3.to_wei(node["wxhopr"], "ether"))._encode_transaction_data()
             journal.send(

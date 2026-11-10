@@ -26,7 +26,11 @@ Check with `./gnosis_vpn-bench config`. It warns about credential files
 that group or others can read; fix them with `chmod 600`. The tool never
 moves them.
 
-For `fund` and `recover`, install the extra: `pip install -e '.[remote]'`.
+For `fund` and `recover`, install the extra into the checkout's `.venv`:
+`python3 -m venv .venv && .venv/bin/pip install -e '.[remote]'`. The
+launcher re-executes itself with `.venv/bin/python` when that exists
+(`GVPN_BENCH_NO_VENV=1` opts out), and `config` fails with
+`web3 : MISSING` when the interpreter in use cannot import web3.
 
 ## 1. Plan
 
@@ -63,7 +67,13 @@ target on the network's indexer: the exit must be a registered node with
 an announced address, and for a v5 profile that discovers exits it must
 announce a `gvpn:exit` service. The profile's pinned package URL must
 answer HTTP 200 (apt pools drop old releases; pin the GitHub release
-asset instead). A failed check creates nothing.
+asset instead). It also checks capacity: the DigitalOcean account must
+have room for every droplet of the run (when the API token cannot read the
+account, it says the limit is unknown and goes on), and when the profile
+has a `[funding]` estimate, the funding Safe must hold `clients ×` that
+much wxHOPR and xDAI. A failed check creates nothing. `fund` itself sends
+nothing unless the Safe covers every outstanding transfer, so a run is
+never left with only some clients funded.
 
 Connecting gives up on a client early when the exit refuses its
 registration twice (HTTP 404 on `clients/register`, i.e. no free slot),
@@ -182,7 +192,12 @@ through its tunnel with no transfer running (`concurrent.idle_ping`).
 `RUN/results/<target>-pass<N>/`, raw data goes to one folder per pass
 under `RUN/data/<target>/`, and the results are pushed after every pass.
 
-The run log has, per rung, `rung N: X of Y clients connected; exit slots
+The run log is `RUN/logs/run.log`: every step of the run appends its log
+records (UTC timestamps) and everything it prints, line by line, so one
+`tail -F` follows a whole run, `execute` included. It holds VM addresses
+and is never published. Retries that are expected while a VM boots
+(refused SSH, cloud-init not done, guard units not loaded yet) are logged
+at DEBUG and do not appear in it. It has, per rung, `rung N: X of Y clients connected; exit slots
 a/b in use` and then one line per client, `rung N <client>: <Mbit/s>
 Mbit/s, <bytes> bytes, complete <bool>, ping <ms> ms`. Every step ends
 with `step <name> finished: exit <code>`. A run's last line is `step
@@ -322,7 +337,8 @@ It never creates the results repository; create it on GitHub as
 ```
 
 Shows the steps done, the droplets from the inventory, and where the funds
-are (sent, recovered or still held by the clients).
+are. "sent" means confirmed in the transaction journal; a planned transfer
+that was never confirmed shows as "planned, not sent" (or "PARTLY sent").
 
 ## Historical results
 

@@ -22,8 +22,9 @@ Local modes:
 - `sudo` only if the DNS workaround is needed (see `--dns` below)
 
 Remote runs additionally need `ssh`, `ssh-keygen`, a user systemd instance
-(for the deletion timer), and for `fund`/`recover`:
-`pip install -e '.[remote]'` (web3). Credentials are read from the files named
+(for the deletion timer), and for `fund`/`recover`: web3 in the checkout's
+`.venv` (`.venv/bin/pip install -e '.[remote]'`; the launcher uses that venv
+when it exists). Credentials are read from the files named
 in `~/.config/gvpn-bench/config.toml`; see [the runbook](docs/runbook.md).
 
 Publishing PNG charts also needs `rsvg-convert` (`apt install librsvg2-bin`).

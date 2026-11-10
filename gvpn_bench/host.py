@@ -54,6 +54,7 @@ class Host(Protocol):
         *,
         timeout_s: float = 30,
         input_bytes: bytes | None = None,
+        expected_failure: bool = False,
     ) -> CommandResult: ...
 
     def popen(self, argv: Sequence[str], *, merge_stderr: bool = False) -> subprocess.Popen[bytes]:
@@ -65,8 +66,14 @@ class Host(Protocol):
         ...
 
 
-def _run_local(argv: Sequence[str], timeout_s: float, input_bytes: bytes | None) -> CommandResult:
-    """Run *argv* with subprocess; never raises for timeouts or missing tools."""
+def _run_local(
+    argv: Sequence[str], timeout_s: float, input_bytes: bytes | None, expected_failure: bool = False
+) -> CommandResult:
+    """Run *argv* with subprocess; never raises for timeouts or missing tools.
+
+    *expected_failure* logs a non-zero exit at DEBUG: polling and probes that
+    fail until something is ready must not flood the run log with warnings.
+    """
     try:
         completed = subprocess.run(
             list(argv),
@@ -85,8 +92,10 @@ def _run_local(argv: Sequence[str], timeout_s: float, input_bytes: bytes | None)
         completed.stdout.decode("utf-8", errors="replace"),
         completed.stderr.decode("utf-8", errors="replace"),
     )
-    if result.returncode in _QUIET_RETURN_CODES:
-        log.debug("CMD rc=%d stdout_len=%d", result.returncode, len(result.stdout))
+    if result.returncode in _QUIET_RETURN_CODES or expected_failure:
+        log.debug(
+            "CMD rc=%d stdout_len=%d stderr: %s", result.returncode, len(result.stdout), result.stderr.strip()[:300]
+        )
     else:
         log.warning("CMD exited %d | stderr: %s", result.returncode, result.stderr.strip()[:300])
     return result
@@ -104,9 +113,10 @@ class LocalHost:
         *,
         timeout_s: float = 30,
         input_bytes: bytes | None = None,
+        expected_failure: bool = False,
     ) -> CommandResult:
         log.debug("CMD[%s]: %s", self.name, shlex.join(argv))
-        return _run_local(argv, timeout_s, input_bytes)
+        return _run_local(argv, timeout_s, input_bytes, expected_failure)
 
     def popen(self, argv: Sequence[str], *, merge_stderr: bool = False) -> subprocess.Popen[bytes]:
         log.debug("POPEN[%s]: %s", self.name, shlex.join(argv))
@@ -184,10 +194,11 @@ class SshHost:
         *,
         timeout_s: float = 30,
         input_bytes: bytes | None = None,
+        expected_failure: bool = False,
     ) -> CommandResult:
         log.debug("CMD[%s]: %s", self.name, shlex.join(argv))
-        result = _run_local(self.ssh_argv(argv), timeout_s, input_bytes)
-        if result.returncode == 255:
+        result = _run_local(self.ssh_argv(argv), timeout_s, input_bytes, expected_failure)
+        if result.returncode == 255 and not expected_failure:
             log.error("ssh to %s failed: %s", self.name, result.stderr.strip()[:300])
         return result
 

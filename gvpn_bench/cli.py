@@ -42,6 +42,7 @@ from .monitor import (
 )
 from .profiles import load_target
 from .runcli import add_run_commands
+from .runlog import run_log
 from .settings import DEFAULT_RUNS, DEFAULT_WAIT_BETWEEN_S, DEFAULT_WARMUP_S, LOG_DIR
 from .vpn import VpnClient
 
@@ -129,15 +130,30 @@ def run_step(args: argparse.Namespace) -> int:
     when steps run one by one, or ``step execute finished`` for ``execute``.
     """
     code: int | str | None = 1
-    try:
-        code = args.run_func(args)
-    except SystemExit as error:
-        # sys.exit("message") carries a string, which means exit status 1.
-        code = error.code if isinstance(error.code, int) or error.code is None else 1
-        raise
-    finally:
-        print(f"step {step_name(args)} finished: exit {code if code is not None else 0}", flush=True)
+    level = getattr(logging, getattr(args, "log_level", "INFO"), logging.INFO)
+    with run_log(step_run_dir(args), level):
+        try:
+            code = args.run_func(args)
+        except SystemExit as error:
+            # sys.exit("message") carries a string, which means exit status 1.
+            code = error.code if isinstance(error.code, int) or error.code is None else 1
+            raise
+        finally:
+            print(f"step {step_name(args)} finished: exit {code if code is not None else 0}", flush=True)
     return code
+
+
+def step_run_dir(args: argparse.Namespace) -> Path | None:
+    """The directory of the one existing run a step works on, for its run log; else None."""
+    ref = getattr(args, "run", None)
+    if not isinstance(ref, str):
+        return None
+    try:
+        from .runs import load_user_config, open_run
+
+        return open_run(ref, load_user_config()).path
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def main(argv: list[str] | None = None) -> None:

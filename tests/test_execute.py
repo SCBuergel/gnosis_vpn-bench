@@ -42,6 +42,7 @@ def faked(tmp_path, monkeypatch):
     monkeypatch.setattr(runcli, "load_user_config", lambda: user)
     monkeypatch.setattr(provision, "preflight", lambda run, profile: None)
     monkeypatch.setattr(provision, "describe_plan", lambda run, profile: "plan")
+    monkeypatch.setattr(steps, "capacity_preflight", lambda user, run, profile: ["checked"])
     monkeypatch.setattr(runcli, "_teardown", lambda user, run, profile: calls.append("teardown") or True)
     monkeypatch.setattr(runcli, "auto_push", lambda run: calls.append("push") or True)
     return run, calls, monkeypatch

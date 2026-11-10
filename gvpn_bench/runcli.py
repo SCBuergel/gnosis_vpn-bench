@@ -85,17 +85,31 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"  {entry['name']:<8} id {entry['id']}  {entry['size']}  {entry.get('region', '')}  {state}")
     funding = _read_state(run, "funding.json") or []
     if funding:
+        from .finance.wallet import Journal
+
         recovered = _read_state(run, "cleanup.json")
-        print("Funds:")
+        confirmed = {e["purpose"] for e in Journal(run).entries() if e.get("status") == "confirmed"}
+        print("Funds (sent = confirmed in the transaction journal):")
+        any_sent = False
         for node in funding:
-            print(f"  {node['name']}: sent {node['wxhopr']} wxHOPR + {node['xdai']} xDAI to {node['address']}")
+            amounts = f"{node['wxhopr']} wxHOPR + {node['xdai']} xDAI to {node['address']}"
+            sent = [asset for asset in ("wxhopr", "xdai") if f"fund:{node['name']}:{asset}" in confirmed]
+            any_sent |= bool(sent)
+            if len(sent) == 2:
+                print(f"  {node['name']}: sent {amounts}")
+            elif sent:
+                print(f"  {node['name']}: PARTLY sent ({', '.join(sent)} confirmed) of {amounts}")
+            else:
+                print(f"  {node['name']}: planned, not sent: {amounts}")
         if recovered:
             print(
                 f"  recovered {recovered.get('recovered_wxHOPR')} wxHOPR, "
                 f"{recovered.get('recovered_xDAI')} xDAI to the funding Safe"
             )
-        else:
+        elif any_sent:
             print("  NOT recovered yet: funds are held by the client nodes/Safes and open channels")
+        else:
+            print("  nothing sent yet")
     for name in config.target_names:
         directory = run.path / "results" / name
         print(
@@ -128,6 +142,13 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def web3_available() -> bool:
+    """Whether this interpreter can import web3, without importing it."""
+    import importlib.util
+
+    return importlib.util.find_spec("web3") is not None
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """Show where bench looks for credentials and runs; check file modes."""
     user = load_user_config()
@@ -143,6 +164,10 @@ def cmd_config(args: argparse.Namespace) -> int:
         problems = check_private_file(path)
         print(f"{label:<17}: {path}  {'ok' if not problems else '; '.join(problems)}")
         status |= bool(problems)
+    web3_ok = web3_available()
+    hint = "ok" if web3_ok else "MISSING (fund and recover need it): pip install -e '.[remote]'"
+    print(f"web3             : {hint}  ({sys.executable})")
+    status |= not web3_ok
     print(f"profiles         : {', '.join(list_names(CONFIG_ROOT / 'profiles'))}")
     print(f"targets          : {', '.join(list_names(CONFIG_ROOT / 'targets'))}")
     return status
@@ -164,6 +189,8 @@ def cmd_provision(args: argparse.Namespace) -> int:
 
     user, run, profile, _target = _open(args)
     prov.preflight(run, profile)
+    for note in steps.capacity_preflight(user, run, profile):
+        print(f"pre-flight: {note}")
     print(prov.describe_plan(run, profile))
     if not confirm("Create these billable droplets?", args.yes):
         return 1
@@ -519,6 +546,8 @@ def cmd_execute(args: argparse.Namespace) -> int:
         wallet.require_web3()  # before any droplet exists: funding and recovery need it
     if not run.done("provision"):
         prov.preflight(run, profile)
+        for note in steps.capacity_preflight(user, run, profile):
+            print(f"pre-flight: {note}")
         print(prov.describe_plan(run, profile))
     print(f"Targets: {', '.join(f'{t.label} ({t.exit_address})' for t in targets)}")
     print("Funding: each client's recommended wxHOPR and xDAI from the funding Safe.")

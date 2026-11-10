@@ -23,7 +23,14 @@ class FakeHost:
     calls: list[list[str]] = field(default_factory=list)
     inputs: list[bytes | None] = field(default_factory=list)
 
-    def run(self, argv: Sequence[str], *, timeout_s: float = 30, input_bytes: bytes | None = None):
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float = 30,
+        input_bytes: bytes | None = None,
+        expected_failure: bool = False,
+    ):
         self.calls.append(list(argv))
         self.inputs.append(input_bytes)
         return self.responder(list(argv), input_bytes)

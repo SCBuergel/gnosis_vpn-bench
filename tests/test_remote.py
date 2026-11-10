@@ -69,13 +69,13 @@ def test_ready_probe_never_multiplexes(monkeypatch, tmp_path):
 
     seen = []
 
-    def fake_run(self, argv, *, timeout_s=30, input_bytes=None):
-        seen.append(self.control_dir)
+    def fake_run(self, argv, *, timeout_s=30, input_bytes=None, expected_failure=False):
+        seen.append((self.control_dir, expected_failure))
         return CommandResult(0, "", "")
 
     monkeypatch.setattr(SshHost, "run", fake_run)
     provision.wait_ready(SshHost(name="h", address="192.0.2.1", control_dir=tmp_path))
-    assert seen == [None]
+    assert seen == [(None, True)]  # fresh connections; boot-time refusals are not warnings
 
 
 def test_droplet_name_is_sanitised():

@@ -9,6 +9,12 @@ version = "0.96.0"
 url = "https://github.com/gnosis/gnosis_vpn/releases/download/v0.96.0/gnosisvpn_0.96.0_amd64.deb"
 sha256 = "1ed6ba106b07056e49f8d6bde9790fd39de04bca9b410184083b9a7ad748e30b"
 
+# What one client's PreparingSafe asks for (0.97.0, 2026-11-10). provision and
+# execute check the funding Safe covers clients × this before creating droplets.
+[funding]
+expected_wxhopr = "241.01"
+expected_xdai = "0.005"
+
 [worker]
 model = "v4-root"
 

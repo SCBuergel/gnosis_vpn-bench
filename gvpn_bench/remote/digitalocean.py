@@ -96,6 +96,17 @@ class Api:
                 return None
             raise
 
+    def droplet_headroom(self) -> int | None:
+        """How many more droplets the account may create; None if the token cannot read the account."""
+        try:
+            limit = int(self.request("GET", "account")["account"]["droplet_limit"])
+        except ApiError as error:
+            if error.status in (401, 403):
+                return None
+            raise
+        existing = int(self.request("GET", "droplets?per_page=1")["meta"]["total"])
+        return limit - existing
+
     def droplets_with_tag(self, tag: str) -> list[dict[str, Any]]:
         return self.request("GET", f"droplets?tag_name={tag}&per_page=200")["droplets"]
 

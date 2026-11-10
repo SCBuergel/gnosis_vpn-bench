@@ -47,12 +47,13 @@ def operator_route(host: Host) -> tuple[str, str, str]:
 def start_guards(host: Host, profile: Profile) -> None:
     operator_ip, gateway, device = operator_route(host)
     host.run(["touch", HEARTBEAT_FILE], timeout_s=20)
-    host.run(["systemctl", "reset-failed", "gvpn-ssh-keeper", "gvpn-deadman"], timeout_s=20)
+    # Fails on a fresh VM where the units never ran; that is the usual case.
+    host.run(["systemctl", "reset-failed", "gvpn-ssh-keeper", "gvpn-deadman"], timeout_s=20, expected_failure=True)
     for unit, argv in (
         ("gvpn-ssh-keeper", [f"{REMOTE_DIR}/ssh-keeper.sh", operator_ip, gateway, device]),
         ("gvpn-deadman", [f"{REMOTE_DIR}/deadman.sh", profile.worker.user]),
     ):
-        active = host.run(["systemctl", "is-active", unit], timeout_s=20)
+        active = host.run(["systemctl", "is-active", unit], timeout_s=20, expected_failure=True)
         if active.stdout.strip() == "active":
             continue
         started = host.run(["systemd-run", f"--unit={unit}", *argv], timeout_s=30)

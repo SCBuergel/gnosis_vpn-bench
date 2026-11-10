@@ -1,12 +1,34 @@
 #!/usr/bin/env python3
-"""Launcher: run the gvpn_bench CLI from a checkout without installing it."""
+"""Launcher: run the gvpn_bench CLI from a checkout without installing it.
 
+When the checkout has a ``.venv`` (where ``pip install -e '.[remote]'``
+put web3), the launcher re-executes itself with that interpreter, so remote
+steps get web3 however the launcher is started. ``GVPN_BENCH_NO_VENV=1``
+keeps the interpreter that started it.
+"""
+
+import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+VENV = HERE / ".venv"
 
-from gvpn_bench.cli import main  # noqa: E402
+
+def _venv_python() -> Path | None:
+    python = VENV / "bin" / "python"
+    if not python.exists() or os.environ.get("GVPN_BENCH_NO_VENV"):
+        return None
+    if Path(sys.prefix).resolve() == VENV.resolve():
+        return None
+    return python
+
 
 if __name__ == "__main__":
+    python = _venv_python()
+    if python is not None:
+        os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+    sys.path.insert(0, str(HERE))
+    from gvpn_bench.cli import main
+
     main()
