@@ -73,6 +73,25 @@ def node_account(run: Run, client: str) -> Any:
 # -- phase 1: halt clients ------------------------------------------------------
 
 
+BALANCE_ATTEMPTS = 3
+BALANCE_RETRY_S = 10.0
+
+
+def read_balance(vpn: Any, name: str, attempts: int = BALANCE_ATTEMPTS, pause_s: float = BALANCE_RETRY_S) -> Any:
+    """The worker's ``balance`` answer, retried: a busy worker can fail it once (ctl exit 70)."""
+    for attempt in range(1, attempts + 1):
+        try:
+            balance = vpn.ctl("balance", timeout_s=45).get("Balance", {}).get("Ok")
+        except CtlError as error:
+            log.warning("%s: balance unavailable (attempt %d of %d): %s", name, attempt, attempts, error)
+            balance = None
+        if balance is not None:
+            return balance
+        if attempt < attempts:
+            time.sleep(pause_s)
+    return None
+
+
 def halt_client(
     user: UserConfig,
     run: Run,
@@ -104,10 +123,7 @@ def halt_client(
     vpn = vpn_for(host, profile)
     balance: dict[str, Any] | None = None
     if not saved.exists():
-        try:
-            balance = vpn.ctl("balance", timeout_s=45).get("Balance", {}).get("Ok")
-        except CtlError as error:
-            log.warning("%s: balance unavailable: %s", host.name, error)
+        balance = read_balance(vpn, host.name)
         if balance is None:
             info_file = manifest(run).get(host.name, {}).get("safe_info")
             if not info_file:

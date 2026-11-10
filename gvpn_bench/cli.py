@@ -117,6 +117,27 @@ def build_bench(args: argparse.Namespace, stamp: str, log_file: Path) -> Bench:
 # ---------------------------------------------------------------------------
 
 
+def step_name(args: argparse.Namespace) -> str:
+    """``cmd_results_push`` → ``results push``: the name the run log ends a step with."""
+    return args.run_func.__name__.removeprefix("cmd_").replace("_", " ")
+
+
+def run_step(args: argparse.Namespace) -> int:
+    """Run a step and always end with ``step <name> finished: exit <code>``.
+
+    Log watchers stop on that line, ``step destroy finished`` being a run's last.
+    """
+    code: int | str | None = 1
+    try:
+        code = args.run_func(args)
+    except SystemExit as error:
+        code = error.code
+        raise
+    finally:
+        print(f"step {step_name(args)} finished: exit {code if code is not None else 0}", flush=True)
+    return code
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Gnosis VPN speed tester — multiple test modes",
@@ -383,7 +404,7 @@ modes:
         sys.exit(0)
     if hasattr(args, "run_func"):
         logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s %(message)s")
-        sys.exit(args.run_func(args))
+        sys.exit(run_step(args))
     now = datetime.now()
     log_file = LOG_DIR / f"speedtest_{now:%Y%m%d_%H%M%S}.log"
     setup_logging(args.log_level, log_file)

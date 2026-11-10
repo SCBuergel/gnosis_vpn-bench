@@ -6,8 +6,12 @@ Read `README.md` (usage), `docs/runbook.md` (live runs) and
 ## Checks
 
 ```bash
-.venv/bin/ruff format . && .venv/bin/ruff check . && .venv/bin/pytest
+.venv/bin/ruff format . && .venv/bin/ruff check --fix . && .venv/bin/pytest
 ```
+
+`.claude/settings.json` runs the same format and fix on each Python file
+Claude edits (`.claude/hooks/ruff-fix.sh`); edits made through shell
+commands are only covered by the check above.
 
 Tests are offline. They use fakes, localhost and temporary directories,
 never DigitalOcean, VPN exits, wallets, the chain or public ping targets.

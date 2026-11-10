@@ -34,15 +34,26 @@ section{background:var(--card);border:1px solid var(--line);border-radius:8px;pa
 .scroll{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
 th,td{padding:8px 10px;border-bottom:1px solid var(--grid);text-align:left;vertical-align:top}
-th{font-weight:500;color:var(--muted)}td{overflow-wrap:anywhere}
+th{font-weight:500;color:var(--muted);min-width:5.5em}
+td{white-space:nowrap}td.wide{white-space:normal;min-width:18em;overflow-wrap:break-word}
 svg{width:100%;height:auto;display:block;margin:8px 0}
 footer{font-size:12px}a{color:var(--accent)}
 """
 
 
+# Cells up to this many characters never wrap, so a narrow screen scrolls the
+# table sideways instead of squeezing columns to a few characters wide.
+WRAP_AFTER_CHARS = 40
+
+
+def _cell(text: str) -> str:
+    css = ' class="wide"' if len(text) > WRAP_AFTER_CHARS else ""
+    return f"<td{css}>{escape(text)}</td>"
+
+
 def table(headers: list[str], rows: list[list[Any]]) -> str:
     head = "".join(f"<th>{escape(h)}</th>" for h in headers)
-    body = "".join("<tr>" + "".join(f"<td>{escape(fmt(v))}</td>" for v in row) + "</tr>" for row in rows)
+    body = "".join("<tr>" + "".join(_cell(fmt(v)) for v in row) + "</tr>" for row in rows)
     return f'<div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
 
 
