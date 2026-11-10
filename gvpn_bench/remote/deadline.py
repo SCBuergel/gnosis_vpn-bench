@@ -16,8 +16,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -64,11 +66,92 @@ def schedule(run: Run) -> str:
 
 def cancel(run: Run) -> None:
     subprocess.run(
-        ["systemctl", "--user", "stop", unit_name(run) + ".timer"],
+        ["systemctl", "--user", "stop", _current_unit(run) + ".timer"],
         capture_output=True,
         timeout=30,
         check=False,
     )
+
+
+def _current_unit(run: Run) -> str:
+    path = run.state / "deadline-timer.json"
+    base = unit_name(run)
+    unit = json.loads(path.read_text())["unit"] if path.exists() else base
+    if not isinstance(unit, str) or not re.fullmatch(re.escape(base) + r"(-[0-9]+s)?", unit):
+        raise RuntimeError("refusing to control a deletion timer belonging to another run")
+    return unit
+
+
+def reschedule(run: Run, hours: float, *, now: datetime | None = None) -> str:
+    """Replace the cap from the original provisioning time, with no unprotected gap."""
+    path = run.state / "deadline-timer.json"
+    old = json.loads(path.read_text())
+    old_unit = _current_unit(run)
+    seconds = int(hours * 3600)
+    start = datetime.fromisoformat(old["set_at"].replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        raise ValueError("deletion timer start must include its timezone")
+    deadline_at = start + timedelta(seconds=seconds)
+    if seconds <= 0 or deadline_at <= (now or datetime.now(UTC)):
+        raise ValueError("replacement deletion deadline must be in the future")
+    unit = f"{unit_name(run)}-{seconds}s"
+    if unit == old_unit:
+        raise ValueError("this deletion timeout is already scheduled")
+    completed = subprocess.run(
+        [
+            "systemd-run",
+            "--user",
+            f"--unit={unit}",
+            f"--on-calendar={deadline_at.astimezone(UTC):%Y-%m-%d %H:%M:%S UTC}",
+            "--timer-property=AccuracySec=1s",
+            f"--setenv=PYTHONPATH={REPO_DIR}",
+            sys.executable,
+            "-m",
+            "gvpn_bench.remote.deadline",
+            str(run.path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"cannot install replacement deletion timer: {completed.stderr.strip()}")
+    active = subprocess.run(
+        ["systemctl", "--user", "is-active", unit + ".timer"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if active.returncode != 0 or active.stdout.strip() != "active":
+        raise RuntimeError("replacement deletion timer is not active; original timer retained")
+    stopped = subprocess.run(
+        ["systemctl", "--user", "stop", old_unit + ".timer"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if stopped.returncode != 0:
+        raise RuntimeError("replacement installed, but original deletion timer could not be stopped")
+    old_active = subprocess.run(
+        ["systemctl", "--user", "is-active", old_unit + ".timer"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if old_active.returncode == 0:
+        raise RuntimeError("original deletion timer is still active")
+    write_private_json(
+        path,
+        {
+            "unit": unit,
+            "seconds": seconds,
+            "set_at": old["set_at"],
+            "deadline_at": deadline_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+            "rescheduled_at": utc_now(),
+            "previous_unit": old_unit,
+        },
+    )
+    return unit
 
 
 def missing_backups(run: Run) -> list[str]:

@@ -1,0 +1,5 @@
+label = "India"
+exit_address = "0x1062696f8eec5b71bfa6be7e52df1d7457428106"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Mumbai"

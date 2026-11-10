@@ -11,7 +11,9 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import re
 import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ from ..results.store import (
     write_result,
 )
 from ..runs import Run, UserConfig, utc_now, write_private_json
+from ..vpn import CtlError
 from . import deadline, guards, preflight
 from .backup import backup_identity, save_safe_info
 from .connect import ConnectOutcome, connect_client, connect_to, disconnect, vpn_for
@@ -56,8 +59,9 @@ def _parallel(function, items):
 
 
 def step_preflight(run: Run, profile: Profile) -> None:
-    """Refuse to create VMs for a target the network's indexer does not know."""
+    """Refuse to create VMs for an unknown target or a package that cannot be downloaded."""
     problems = preflight.check(profile, run.config.targets(), run_client_config=run.config.client_config is not None)
+    problems += preflight.package_problems(profile)
     if problems:
         raise RuntimeError("pre-flight check failed, no VM created:\n  " + "\n  ".join(problems))
     log.info("pre-flight: every target is a registered, announced node on %s", profile.network.name)
@@ -153,8 +157,54 @@ def direct_baseline(run: Run, hosts: list[Host], origin_ip: str) -> list[dict[st
     return rows
 
 
-def result_dir(run: Run, target: Target) -> Path:
-    return run.path / "results" / target.name
+def result_dir(run: Run, target: Target, pass_no: int | None = None) -> Path:
+    """``results/<target>``; pass 2 and later of a repeated ladder get ``<target>-pass<N>``."""
+    name = target.name if pass_no is None or pass_no == 1 else f"{target.name}-pass{pass_no}"
+    return run.path / "results" / name
+
+
+IDLE_PING_COUNT = 30
+_PING_SUMMARY = re.compile(r"(\d+) packets transmitted, (\d+) received")
+_PING_RTT = re.compile(r"= ([\d.]+)/([\d.]+)/([\d.]+)/")
+
+
+def parse_ping(client: str, output: str) -> dict[str, Any]:
+    """Summary of ``ping -q`` output; RTTs are null when nothing came back."""
+    summary = _PING_SUMMARY.search(output)
+    rtt = _PING_RTT.search(output)
+    sent = int(summary.group(1)) if summary else None
+    received = int(summary.group(2)) if summary else None
+    return {
+        "client": client,
+        "sent": sent,
+        "received": received,
+        "loss_pct": round(100 * (sent - received) / sent, 1) if sent and received is not None else None,
+        "min_ms": float(rtt.group(1)) if rtt else None,
+        "mean_ms": float(rtt.group(2)) if rtt else None,
+        "max_ms": float(rtt.group(3)) if rtt else None,
+        "status": "measured" if rtt else "no_reply",
+    }
+
+
+def idle_ping(hosts: list[Host], ping_target: str, count: int = IDLE_PING_COUNT) -> list[dict[str, Any]]:
+    """Unloaded round trip through each client's tunnel, all clients at once, before any transfer."""
+
+    def measure(host: Host) -> dict[str, Any]:
+        result = host.run(["ping", "-q", "-c", str(count), "-i", "1", "-W", "3", ping_target], timeout_s=count + 30)
+        return parse_ping(host.name, result.stdout)
+
+    rows = _parallel(measure, hosts) if hosts else []
+    for row in rows:
+        log.info(
+            "idle ping %s: %s of %s replies, min/mean/max %s/%s/%s ms",
+            row["client"],
+            row["received"],
+            row["sent"],
+            row["min_ms"],
+            row["mean_ms"],
+            row["max_ms"],
+        )
+    return rows
 
 
 def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -> list[ConnectOutcome]:
@@ -176,10 +226,17 @@ def step_connect(user: UserConfig, run: Run, profile: Profile, target: Target) -
     for outcome, (_entry, host) in zip(outcomes, pairs, strict=True):
         # The Safe file exists once the funded node deployed its Safe.
         backup_identity(user, run, profile, host, require_safe=outcome.status == "connected")
-        if outcome.status == "connected":
-            info = vpn_for(host, profile).ctl("balance", timeout_s=45).get("Balance", {}).get("Ok", {})
-            if info.get("info"):
-                save_safe_info(user, run, profile, host.name, info["info"])
+        # Every funded client has a Safe, connected or not: a client the exit
+        # refused still needs its Safe info for recovery.
+        try:
+            info = vpn_for(host, profile).ctl("balance", timeout_s=45).get("Balance", {}).get("Ok") or {}
+        except CtlError as error:
+            log.warning("%s: balance unavailable after connect: %s", host.name, error)
+            info = {}
+        if info.get("info"):
+            save_safe_info(user, run, profile, host.name, info["info"])
+        elif outcome.status == "connected":
+            log.warning("%s: connected but the balance call returned no Safe info", host.name)
     write_private_json(
         run.state / f"connect-{target.name}.json",
         [
@@ -229,12 +286,14 @@ def step_ladder(run: Run, profile: Profile, target: Target) -> list[dict[str, An
         log.info("%s: reconnect → %s %s", host.name, outcome.status, outcome.detail)
         return outcome.status == "connected"
 
+    connected = [h for _, h in pairs if statuses.get(h.name) == "connected"]
     started = utc_now()
+    pings = idle_ping(connected, run.config.ladder.ping_target)
     rungs = run_ladder(
         run,
         profile,
         target,
-        [h for _, h in pairs if statuses.get(h.name) == "connected"],
+        connected,
         str(origin.ip),
         origin_sha,
         data_dir=run.data / target.name,
@@ -243,7 +302,7 @@ def step_ladder(run: Run, profile: Profile, target: Target) -> list[dict[str, An
     )
     write_private_json(
         run.state / f"ladder-{target.name}.json",
-        {"rungs": rungs, "started_at": started, "finished_at": utc_now()},
+        {"rungs": rungs, "idle_ping": pings, "started_at": started, "finished_at": utc_now()},
     )
     run.mark("ladder", target=target.name, totals={r["rung"]: r["total_mbps"] for r in rungs})
     return rungs
@@ -385,6 +444,17 @@ def build_result(run: Run, profile: Profile, target: Target) -> dict[str, Any]:
                             "cpu_model",
                             "os",
                             "kernel",
+                            "architecture",
+                            "cpu_vendor",
+                            "cpu_sockets",
+                            "cores_per_socket",
+                            "threads_per_core",
+                            "hypervisor",
+                            "root_disk_gib",
+                            "root_free_gib",
+                            "swap_mib",
+                            "package_version",
+                            "ctl_version",
                         )
                     }
                     for m in machines
@@ -405,6 +475,7 @@ def build_result(run: Run, profile: Profile, target: Target) -> dict[str, Any]:
             },
             "origin": _read(run, "origin.json"),
             "baseline": _read(run, "baseline.json") or [],
+            "idle_ping": ladder.get("idle_ping", []),
             "rungs": ladder["rungs"],
         }
         for rung in ladder["rungs"]:
@@ -453,9 +524,70 @@ def build_result(run: Run, profile: Profile, target: Target) -> dict[str, Any]:
     return result
 
 
-def step_result(run: Run, profile: Profile, target: Target) -> Path:
-    directory = result_dir(run, target)
+def step_result(run: Run, profile: Profile, target: Target, pass_no: int | None = None) -> Path:
+    directory = result_dir(run, target, pass_no)
     directory.mkdir(parents=True, exist_ok=True)
     write_result(directory, build_result(run, profile, target))
     write_report(directory)
     return directory
+
+
+# -- payment check ---------------------------------------------------------------
+
+# Below this many wxHOPR spent, a PIX run counts as having taken no payment.
+PIX_SPEND_EPSILON = Decimal("0.000001")
+
+
+def payment_summary(run: Run, profile: Profile, transferred_bytes: int) -> dict[str, Any] | None:
+    """Funded, recovered and spent wxHOPR after recovery, plus a warning when PIX took nothing."""
+    nodes = _read(run, "funding.json")
+    recovered = run.steps().get("recover", {}).get("recovered_wxHOPR")
+    if not nodes or recovered is None:
+        return None
+    funded = sum((Decimal(str(n["wxhopr"])) for n in nodes), Decimal(0))
+    spent = funded - Decimal(str(recovered))
+    pix = profile.worker.payment_dir(profile.network.name) is not None
+    summary: dict[str, Any] = {
+        "funded_wxHOPR": str(funded),
+        "recovered_wxHOPR": str(recovered),
+        "spent_wxHOPR": str(spent),
+        "pix": pix,
+        "transferred_bytes": transferred_bytes,
+    }
+    if pix and transferred_bytes > 0 and spent < PIX_SPEND_EPSILON:
+        summary["warning"] = {
+            "code": "pix_no_payment",
+            "detail": (
+                f"{profile.network.name} uses PIX, {transferred_bytes} bytes went through the tunnel, "
+                f"but only {spent} wxHOPR was spent: PIX took no payment"
+            ),
+        }
+    return summary
+
+
+def _transferred_bytes(result: dict[str, Any]) -> int:
+    rungs = (result.get("concurrent") or {}).get("rungs") or []
+    return sum(c.get("downloaded_bytes") or 0 for r in rungs for c in r.get("per_client", []))
+
+
+def step_payment_check(run: Run, profile: Profile) -> list[str]:
+    """After recovery: add the payment summary (and any warning) to every result, re-render.
+
+    Returns the warnings; the caller pushes the updated results before deleting VMs.
+    """
+    warnings: list[str] = []
+    for path in sorted((run.path / "results").glob("*/result.json")):
+        result = json.loads(path.read_text())
+        summary = payment_summary(run, profile, _transferred_bytes(result))
+        if summary is None:
+            continue
+        warning = summary.pop("warning", None)
+        result["payment"] = summary
+        result["warnings"] = [w for w in result.get("warnings", []) if w.get("code") != "pix_no_payment"]
+        if warning:
+            result["warnings"].append(warning)
+            warnings.append(f"{path.parent.name}: {warning['detail']}")
+            log.warning("WARNING %s: %s", path.parent.name, warning["detail"])
+        write_result(path.parent, result)
+        write_report(path.parent)
+    return warnings

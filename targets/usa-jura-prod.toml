@@ -1,0 +1,5 @@
+label = "USA"
+exit_address = "0x7220cfe91f369bfe79f883c2891e97407d7a4d48"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Omaha"

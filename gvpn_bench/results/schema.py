@@ -105,6 +105,16 @@ def _validate_run(run: dict[str, Any]) -> None:
     _timestamp(run, "finished_at", "run", nullable=True)
     _check_type(_require(run, "reproducible", "run"), (bool,), "run.reproducible")
     _string(run, "notes", "run")
+    if "experiment" in run:
+        experiment = run["experiment"]
+        _check_type(experiment, (dict,), "run.experiment")
+        _string(experiment, "id", "run.experiment")
+        for key in ("cycle", "cycles", "position", "targets"):
+            value = _require(experiment, key, "run.experiment")
+            if type(value) is not int or value < 1:
+                raise SchemaError(f"run.experiment.{key}: expected a positive integer")
+        if experiment["cycle"] > experiment["cycles"] or experiment["position"] > experiment["targets"]:
+            raise SchemaError("run.experiment: cycle or position exceeds the planned experiment")
 
 
 def _validate_provenance(prov: dict[str, Any]) -> None:
@@ -150,6 +160,19 @@ def _validate_provenance(prov: dict[str, Any]) -> None:
             _string(machine, key, path, nullable=True)
         for key in ("vcpus", "memory_mib"):
             _number(machine, key, path)
+        for key in ("architecture", "cpu_vendor", "hypervisor", "ctl_version", "package_version"):
+            if key in machine:
+                _string(machine, key, path, nullable=True)
+        for key in (
+            "cpu_sockets",
+            "cores_per_socket",
+            "threads_per_core",
+            "root_disk_gib",
+            "root_free_gib",
+            "swap_mib",
+        ):
+            if key in machine:
+                _number(machine, key, path)
 
 
 def _validate_concurrent(concurrent: dict[str, Any]) -> None:
@@ -233,6 +256,32 @@ def validate(result: dict[str, Any]) -> None:
     failures = _require(result, "failures", "result")
     _check_type(failures, (list,), "failures")
     _validate_failures(failures)
+    _validate_optional(result)
+
+
+def _validate_optional(result: dict[str, Any]) -> None:
+    """Fields added after 1.0 that older results lack: idle ping, payment, warnings."""
+    concurrent = result.get("concurrent") or {}
+    pings = concurrent.get("idle_ping", [])
+    _check_type(pings, (list,), "concurrent.idle_ping")
+    for i, row in enumerate(pings):
+        path = f"concurrent.idle_ping[{i}]"
+        _string(row, "client", path)
+        _string(row, "status", path)
+        for key in ("sent", "received", "loss_pct", "min_ms", "mean_ms", "max_ms"):
+            _number(row, key, path)
+        if row["status"] != "measured" and row["mean_ms"] is not None:
+            raise SchemaError(f"{path}: an idle ping without replies has null RTTs")
+    payment = result.get("payment")
+    if payment is not None:
+        for key in ("funded_wxHOPR", "recovered_wxHOPR", "spent_wxHOPR"):
+            _string(payment, key, "payment")
+        _check_type(_require(payment, "pix", "payment"), (bool,), "payment.pix")
+    warnings = result.get("warnings", [])
+    _check_type(warnings, (list,), "warnings")
+    for i, warning in enumerate(warnings):
+        _string(warning, "code", f"warnings[{i}]")
+        _string(warning, "detail", f"warnings[{i}]")
 
 
 def empty_result(run: dict[str, Any], provenance: dict[str, Any]) -> dict[str, Any]:

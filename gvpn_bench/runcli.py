@@ -198,21 +198,31 @@ def cmd_connect(args: argparse.Namespace) -> int:
     outcomes = steps.step_connect(user, run, profile, target)
     for outcome in outcomes:
         print(f"  {outcome.client}: {outcome.status} {outcome.detail}")
-    return 0 if all(o.status == "connected" for o in outcomes) else 1
+    connected = [o for o in outcomes if o.status == "connected"]
+    if connected and len(connected) < len(outcomes):
+        print(f"{len(connected)} of {len(outcomes)} clients connected; the ladder runs with the connected ones.")
+    return 0 if connected else 1
 
 
 def cmd_ladder(args: argparse.Namespace) -> int:
     from .remote import steps
 
     _user, run, profile, target = _open(args)
-    rungs = steps.step_ladder(run, profile, target)
-    for rung in rungs:
-        value = rung["total_mbps"] if rung["total_mbps"] is not None else f"not measured ({rung['failure_status']})"
-        print(f"  rung {rung['rung']}: {value}")
-    directory = steps.step_result(run, profile, target)
-    print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
-    if not args.no_push:
-        auto_push(run)
+    passes = getattr(args, "passes", 1)
+    if passes < 1:
+        raise SystemExit("--passes must be at least 1")
+    for pass_no in range(1, passes + 1):
+        if passes > 1:
+            print(f"== pass {pass_no} of {passes}")
+        rungs = steps.step_ladder(run, profile, target)
+        for rung in rungs:
+            total = rung["total_mbps"]
+            value = total if total is not None else f"not measured ({rung['failure_status']})"
+            print(f"  rung {rung['rung']}: {value}")
+        directory = steps.step_result(run, profile, target, pass_no if passes > 1 else None)
+        print(f"Wrote {directory / 'result.json'} and {directory / 'report.html'}")
+        if not args.no_push:
+            auto_push(run)  # after every pass, so a later failure cannot lose an earlier one
     return 0
 
 
@@ -250,8 +260,24 @@ def cmd_recover(args: argparse.Namespace) -> int:
         return 1
     cleanup = steps.step_recover_finalize(user, run, profile)
     print(f"Recovered {cleanup['recovered_wxHOPR']} wxHOPR and {cleanup['recovered_xDAI']} xDAI.")
+    _payment_check(run, profile)
     print(f"Next: destroy {run.config.id}")
     return 0
+
+
+def _payment_check(run: Run, profile: Any) -> None:
+    """Record what the run spent in its results and push them again, before any VM is deleted."""
+    from .remote import steps
+
+    try:
+        warnings = steps.step_payment_check(run, profile)
+    except Exception as error:  # a reporting problem must never block teardown
+        print(f"PAYMENT CHECK FAILED: {type(error).__name__}: {error}")
+        return
+    for warning in warnings:
+        print(f"WARNING: {warning}")
+    if any((run.path / "results").glob("*/result.json")):
+        auto_push(run)
 
 
 def cmd_destroy(args: argparse.Namespace) -> int:
@@ -307,18 +333,29 @@ def _publish(args: argparse.Namespace, repo: Path, staged: list[Any], message: s
     written = publish.write(repo, staged)
     if not push.commit(repo, written, message, update=publish.folders(staged)):
         print("Nothing changed; no commit, nothing pushed.")
+        _print_app_copies(repo, staged)
         return 0
     push.push(repo)
     print("Pushed.")
+    _print_app_copies(repo, staged)
     return 0
 
 
+def _print_app_copies(repo: Path, staged: list[Any]) -> None:
+    """The self-contained report page to publish as is (e.g. to the Claude app); never hand-edit it."""
+    for item in staged:
+        if item.folder.startswith("reports/") and "report.html" in item.files:
+            print(f"App copy: {repo / item.folder / 'report.html'}")
+
+
 def _single_run_id(refs: list[str]) -> str | None:
-    """A single run's report is named after the run, so later pushes update it."""
+    """A single run's report uses its creation timestamp, even before measurement."""
     if len(refs) != 1:
         return None
     try:
-        return open_run(refs[0], load_user_config()).config.id
+        from .results.push import timestamp_name
+
+        return timestamp_name(open_run(refs[0], load_user_config()).config.created_at)
     except (FileNotFoundError, ValueError):
         return None
 
@@ -357,7 +394,10 @@ def cmd_results_push(args: argparse.Namespace) -> int:
     if repo is None:
         return 2
     directories = [directory for ref in args.run for directory in result_dirs(ref)]
-    staged = [publish.stage_recording(directory) for directory in directories]
+    existing = publish.repo_recordings(repo)
+    staged = [publish.stage_recording(directory, existing) for directory in directories]
+    if len({item.folder for item in staged}) != len(staged):
+        raise ValueError("recordings share a timestamp; refusing to overwrite either recording")
     recordings = [Recording(item.folder.split("/", 1)[1], json.loads(item.files["result.json"])) for item in staged]
     name = args.report_name or _single_run_id(args.run)
     try:
@@ -451,6 +491,7 @@ def _teardown(user: Any, run: Run, profile: Any) -> bool:
             print("Recovery: waiting for the closure grace period, then returning funds…")
             cleanup = steps.step_recover_finalize(user, run, profile)
             print(f"Recovered {cleanup['recovered_wxHOPR']} wxHOPR and {cleanup['recovered_xDAI']} xDAI.")
+            _payment_check(run, profile)
         if load_inventory(run) and not run.done("destroy"):
             steps.step_destroy(user, run, profile)
             print("All droplets of this run are deleted (verified with the API).")
@@ -521,6 +562,49 @@ def cmd_execute(args: argparse.Namespace) -> int:
     else:
         torn_down = _teardown(user, run, profile)
     return 0 if failure is None and torn_down else 1
+
+
+def _regions() -> list[str]:
+    from .remote.probe import DEFAULT_REGIONS
+
+    return DEFAULT_REGIONS
+
+
+def cmd_probe_regions(args: argparse.Namespace) -> int:
+    """Rank DigitalOcean regions by RTT to an exit; creates and always deletes probe droplets."""
+    import time
+
+    from .remote import probe
+    from .remote.digitalocean import Api, load_token
+
+    user = load_user_config()
+    target = load_target(args.target)
+    regions = args.region or probe.DEFAULT_REGIONS
+    ip = probe.exit_ip(target)
+    probe_id = args.id or f"{target.name}-{time.strftime('%Y%m%d%H%M%S', time.gmtime())}"
+    tag = probe.probe_tag(probe_id)
+    print(f"Exit {target.label} ({target.exit_address}) on {target.network} announces {ip}.")
+    print(f"Creates {len(regions)} {probe.PROBE_SIZE} droplets tagged {tag} in: {', '.join(regions)}.")
+    print("They are deleted again right after measuring (also after errors). No funds, no VPN.")
+    if not confirm("Create these billable probe droplets?", args.yes):
+        return 1
+    api = Api(load_token(user.digitalocean_token_file))
+    results, left = probe.probe_regions(api, ip, regions, tag, user.runs_dir / "probes" / tag)
+    print(f"{'Region':<8} {'RTT ms':>8}  Source")
+    for row in results:
+        rtt = f"{row.rtt_ms:.1f}" if row.rtt_ms is not None else "n/a"
+        source = row.rtt_source or row.status
+        if row.rtt_source == "last_hop":
+            source = f"last responding hop {row.hop}"
+        print(f"{row.region:<8} {rtt:>8}  {source}")
+    if left:
+        print(f"PROBE DROPLETS NOT DELETED: {left} (tag {tag}). Delete them in the DigitalOcean console.")
+        return 1
+    print(f"All probe droplets deleted (no droplet with tag {tag} is left).")
+    best = next((r for r in results if r.rtt_ms is not None), None)
+    if best:
+        print(f'Closest: {best.region}. Set region = "{best.region}" in the run\'s run.toml after plan.')
+    return 0
 
 
 def add_run_commands(sub: argparse._SubParsersAction) -> None:
@@ -601,6 +685,16 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
     )
     p.set_defaults(run_func=cmd_execute)
 
+    p = sub.add_parser(
+        "probe-regions",
+        help="rank DigitalOcean regions by RTT to an exit (creates and deletes small probe droplets)",
+    )
+    p.add_argument("--target", required=True, help="targets/<name>.toml")
+    p.add_argument("--region", action="append", help=f"region to probe (repeatable; default: {', '.join(_regions())})")
+    p.add_argument("--id", help="probe id used in the droplet tag (default: <target>-<UTC time>)")
+    p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    p.set_defaults(run_func=cmd_probe_regions)
+
     remote_steps = [
         ("provision", cmd_provision, "create and prepare the run's droplets (costs money)"),
         ("fund", cmd_fund, "back up identities, then fund each client from the funding Safe"),
@@ -618,6 +712,14 @@ def add_run_commands(sub: argparse._SubParsersAction) -> None:
             p.add_argument("--exit", action="append", metavar="ADDRESS", help="only this exit (repeatable)")
         if name in ("ladder", "sweep"):
             p.add_argument("--no-push", action="store_true", help="do not publish the results automatically")
+            if name == "ladder":
+                p.add_argument(
+                    "--passes",
+                    type=int,
+                    default=1,
+                    metavar="N",
+                    help="run the whole ladder N times; each pass is its own recording (default 1)",
+                )
         if name in ("connect", "ladder"):
             p.add_argument("--target", help="which of the run's targets (default: the first)")
         p.set_defaults(run_func=func)

@@ -4,9 +4,9 @@ A *recording* is one ``result.json``: one run measuring one exit. A
 *collection* is what a report shows: one or more recordings, possibly from
 different runs, exits, networks or client versions.
 
-Recordings that measured the same thing form a *series*: same exit
-address, network, profile and installed client package. A series with
-several recordings is a set of repetitions; the overview then shows the
+Comparable recordings form a *series*: matching exit address, network,
+profile, installed client package, measurement settings, provider and origin
+region. Several recordings form a set of repetitions; the overview shows the
 mean per rung with min–max error bars.
 
 Missing rates stay missing: an unmeasured rung adds nothing to a series,
@@ -46,12 +46,39 @@ class Recording:
         run = self.result["run"]
         return run.get("started_at") or run["created_at"]
 
-    def series_key(self) -> tuple[str, str, str, str]:
+    @property
+    def experiment(self) -> dict[str, Any]:
+        return self.result["run"].get("experiment", {})
+
+    def order_key(self) -> tuple[Any, ...]:
+        if self.experiment:
+            return (
+                self.experiment["id"],
+                self.experiment["cycle"],
+                self.experiment["position"],
+                self.started,
+                self.name,
+            )
+        return (self.result["run"]["id"], 0, 0, self.started, self.name)
+
+    def series_key(self) -> tuple[str, ...]:
+        concurrent = self.result.get("concurrent")
+        spec = (
+            {
+                key: float(value) if isinstance(value, (int, float)) else value
+                for key, value in concurrent["spec"].items()
+            }
+            if concurrent
+            else None
+        )
+        infrastructure = self.result["provenance"]["infrastructure"]
         return (
             self.target["exit_address"],
             self.profile["network"],
             self.profile["name"],
             str(self.client.get("package_version")),
+            json.dumps(spec, sort_keys=True),
+            f"{infrastructure['provider']} {infrastructure.get('region') or 'n/a'}",
         )
 
     def rungs(self) -> list[dict[str, Any]]:
@@ -90,7 +117,7 @@ class Point:
 
 @dataclass
 class Series:
-    key: tuple[str, str, str, str]
+    key: tuple[str, ...]
     label: str
     recordings: list[Recording] = field(default_factory=list)
 
@@ -135,12 +162,14 @@ class Collection:
 
     def series(self) -> list[Series]:
         """Group recordings; label only with what differs across the collection."""
-        groups: dict[tuple[str, str, str, str], Series] = {}
-        for recording in sorted(self.recordings, key=lambda r: r.started):
+        groups: dict[tuple[str, ...], Series] = {}
+        for recording in sorted(self.recordings, key=lambda r: r.order_key()):
             key = recording.series_key()
             groups.setdefault(key, Series(key=key, label="")).recordings.append(recording)
         networks = {k[1] for k in groups}
         profiles = {k[2] for k in groups}
+        workloads = {k[4] for k in groups}
+        regions = {k[5] for k in groups}
         labels_by_exit: dict[str, set[str]] = {}
         for key in groups:
             labels_by_exit.setdefault(key[0], set()).add(key[3])
@@ -153,6 +182,16 @@ class Collection:
                 parts.append(key[2])
             if len(labels_by_exit[key[0]]) > 1:
                 parts.append(f"pkg {key[3]}")
+            if len(workloads) > 1:
+                spec = json.loads(key[4])
+                parts.append(
+                    f"{spec['transfer_bytes']:,} B / {spec['deadline_s']:g} s / "
+                    f"{spec['gap_s']:g} s gap / {spec['ping_target']}@{spec['ping_interval_s']:g} s"
+                    if spec
+                    else "no ladder"
+                )
+            if len(regions) > 1:
+                parts.append(key[5])
             series.label = " · ".join(parts)
         return list(groups.values())
 

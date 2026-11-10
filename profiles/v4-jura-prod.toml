@@ -3,9 +3,10 @@ network = "jura-prod"
 client_config_path = "/etc/gnosisvpn/config.toml"
 
 [package]
+# The apt pool keeps only the latest release; 0.96.0 left it on 2026-11-09.
 channel = "stable"
 version = "0.96.0"
-url = "https://download.vpn.gnosis.eth.limo/linux/apt/pool/main/g/gnosisvpn/gnosisvpn_0.96.0_amd64.deb"
+url = "https://github.com/gnosis/gnosis_vpn/releases/download/v0.96.0/gnosisvpn_0.96.0_amd64.deb"
 sha256 = "1ed6ba106b07056e49f8d6bde9790fd39de04bca9b410184083b9a7ad748e30b"
 
 [worker]

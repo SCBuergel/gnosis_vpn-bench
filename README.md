@@ -26,6 +26,9 @@ Remote runs additionally need `ssh`, `ssh-keygen`, a user systemd instance
 `pip install -e '.[remote]'` (web3). Credentials are read from the files named
 in `~/.config/gvpn-bench/config.toml`; see [the runbook](docs/runbook.md).
 
+Publishing PNG charts also needs `rsvg-convert` (`apt install librsvg2-bin`).
+Local benchmark modes and HTML report generation do not need it.
+
 ## Quick start
 
 ```bash
@@ -75,6 +78,7 @@ alone. With `--run`, DNS is never touched on the run's VMs, whatever
 ## Remote runs
 
 ```bash
+./gnosis_vpn-bench probe-regions --target kenya-jura-prod   # optional: closest region to a new exit
 ./gnosis_vpn-bench plan --profile v4-jura-prod --target netherlands-jura-prod --target austria-jura-prod
 ./gnosis_vpn-bench execute RUN       # everything below in one go, then recover + destroy
 ```
@@ -90,7 +94,7 @@ The individual steps:
 ./gnosis_vpn-bench provision RUN     # asks first; costs money
 ./gnosis_vpn-bench fund RUN          # asks first; moves funds
 ./gnosis_vpn-bench connect RUN [--target NAME]
-./gnosis_vpn-bench ladder RUN [--target NAME]   # and/or: sweep RUN; both push results
+./gnosis_vpn-bench ladder RUN [--target NAME] [--passes N]   # and/or: sweep RUN; both push results
 ./gnosis_vpn-bench recover RUN       # asks first; returns funds
 ./gnosis_vpn-bench destroy RUN       # asks first; deletes this run's VMs
 ./gnosis_vpn-bench status RUN

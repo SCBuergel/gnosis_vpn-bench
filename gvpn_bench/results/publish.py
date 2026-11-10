@@ -4,10 +4,10 @@ Layout::
 
     README.md                       index of all reports and recordings
     runs/<recording>/               one recording = one run × one exit
-        result.json  provenance.json  report.html  README.md  charts/*.svg
+        result.json  provenance.json  report.html  README.md  charts/*.png
     reports/<report>/               one or more recordings, possibly several
         report.json                 exits, runs or repetitions
-        report.html  README.md  charts/*.svg
+        report.html  README.md  charts/*.png
 
 ``README.md`` files are what GitHub renders (web and app); ``report.html``
 is the same content as a single page. Every push adds the run's recordings
@@ -24,17 +24,22 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from collections import Counter
 from dataclasses import dataclass, field
+from html import escape
 from pathlib import Path
 from typing import Any
 
+from .charts import PngChart, rasterize
 from .collection import Collection, Recording, load_recording
 from .markdown import render_markdown
-from .push import destination_name, scan_text, vm_ips_of
+from .push import destination_name, scan_text, timestamp_name, vm_ips_of
 from .render import default_title, render_collection
 from .schema import validate
 
-ALLOWED = re.compile(r"(result\.json|provenance\.json|report\.html|README\.md|report\.json|charts/[a-z0-9-]+\.svg)")
+ALLOWED = re.compile(
+    r"(result\.json|provenance\.json|report\.html|README\.md|report\.json|charts/[a-z0-9-]+\.(svg|png))"
+)
 _SLUG = re.compile(r"[^a-z0-9_.-]+")
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -42,7 +47,7 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 @dataclass
 class Staged:
     folder: str  # repo-relative, e.g. "runs/2026-10-31-101146Z-netherlands-jura-prod-v4-jura-prod"
-    files: dict[str, str]
+    files: dict[str, str | PngChart]
     vm_ips: set[str] = field(default_factory=set)
 
 
@@ -54,7 +59,7 @@ def _json(payload: Any) -> str:
     return json.dumps(payload, indent=2) + "\n"
 
 
-def recording_files(name: str, result: dict[str, Any]) -> dict[str, str]:
+def recording_files(name: str, result: dict[str, Any]) -> dict[str, str | PngChart]:
     collection = Collection(f"Gnosis VPN: {default_title(result)}", [Recording(name, result)])
     readme, charts = render_markdown(collection)
     return {
@@ -66,10 +71,32 @@ def recording_files(name: str, result: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def stage_recording(result_dir: Path) -> Staged:
+def recording_identity(result: dict[str, Any]) -> tuple[Any, ...]:
+    """Keep a recording addressable after an archive folder has been renamed."""
+    run = result["run"]
+    experiment = run.get("experiment", {})
+    target = result["provenance"]["target"]
+    return (
+        run["id"],
+        target["name"],
+        target["network"],
+        result["provenance"]["profile"]["name"],
+        experiment.get("cycle"),
+        None if experiment else run.get("started_at"),
+    )
+
+
+def stage_recording(result_dir: Path, existing: dict[str, Recording] | None = None) -> Staged:
     result = json.loads((result_dir / "result.json").read_text())
     validate(result)
     name = destination_name(result)
+    matches = [r.name for r in (existing or {}).values() if recording_identity(r.result) == recording_identity(result)]
+    if len(matches) > 1:
+        raise ValueError("multiple published folders identify the same recording")
+    if matches:
+        name = matches[0]
+    if name in (existing or {}) and recording_identity(existing[name].result) != recording_identity(result):
+        raise ValueError(f"recording timestamp collision: {name}")
     return Staged(f"runs/{name}", recording_files(name, result), vm_ips_of(result_dir))
 
 
@@ -82,15 +109,12 @@ def folder_name(name: str) -> str:
 
 
 def report_name(recordings: list[Recording]) -> str:
-    first = min(recordings, key=lambda r: r.started)
-    when = first.started
-    stamp = f"{when[:10]}-{when[11:13]}{when[14:16]}{when[17:19]}Z"
-    targets = sorted({r.target["name"] for r in recordings})
-    profiles = sorted({r.profile["name"] for r in recordings})
-    return f"{stamp}-{slug('_'.join(targets))}-{slug('_'.join(profiles))}"
+    return timestamp_name(min(r.result["run"]["created_at"] for r in recordings))
 
 
-def report_files(name: str, title: str, recordings: list[Recording], links: dict[str, str]) -> dict[str, str]:
+def report_files(
+    name: str, title: str, recordings: list[Recording], links: dict[str, str]
+) -> dict[str, str | PngChart]:
     collection = Collection(title, recordings)
     link_lines = [f"[{label}]({url})" for label, url in links.items()]
     link_lines += [f"[{r.name}](../../runs/{r.name}/)" for r in sorted(recordings, key=lambda r: r.started)]
@@ -142,12 +166,81 @@ def _rung_totals(recording: Recording) -> str:
     return " / ".join(f"{r['total_mbps']:.1f}" if r["total_mbps"] is not None else "n/a" for r in rungs)
 
 
+def experiment_summary(recordings: list[Recording]) -> str:
+    """One factual sentence per experiment; missing throughput never becomes zero."""
+    exits = sorted({r.target["label"] for r in recordings})
+    networks = ", ".join(sorted({r.profile["network"] for r in recordings}))
+    profiles = ", ".join(sorted({r.profile["name"] for r in recordings}))
+    locations = " + ".join(exits) if len(exits) <= 2 else f"{len(exits)} exits"
+    description = (
+        f"{locations} on {networks} ({profiles}); {len(recordings)} recording{'s' if len(recordings) != 1 else ''}"
+    )
+    cycles = {r.experiment.get("cycle") for r in recordings if r.experiment}
+    if cycles:
+        description += f", {len(cycles)} cycle{'s' if len(cycles) != 1 else ''}"
+    rungs = [(r, rung) for r in recordings for rung in r.rungs()]
+    measured = [(r, rung) for r, rung in rungs if rung["status"] == "measured"]
+    if rungs:
+        sizes = [row["rung"] for _, row in rungs]
+        description += f", {min(sizes)}–{max(sizes)} clients; {len(measured)}/{len(rungs)} rungs measured"
+    if measured:
+        recording, peak = max(measured, key=lambda pair: pair[1]["total_mbps"])
+        description += f"; peak {peak['total_mbps']:.2f} Mbit/s at {peak['rung']} clients ({recording.target['label']})"
+    else:
+        checks = [row for r in recordings for row in r.result["availability"]]
+        if checks:
+            description += (
+                f"; {sum(row['status'] == 'connected' for row in checks)}/{len(checks)} availability checks connected"
+            )
+        description += "; no ladder throughput measured"
+    failed = Counter(row["failure_status"] for _, row in rungs if row["status"] == "failed")
+    if failed:
+        description += "; failures: " + ", ".join(f"{status} ×{count}" for status, count in sorted(failed.items()))
+    if any(not r.result["run"]["reproducible"] for r in recordings):
+        description += "; historical import"
+    return description + "."
+
+
+def _experiments(recordings: dict[str, Recording], reports: dict[str, dict[str, Any]]) -> list[str]:
+    groups: dict[str, list[Recording]] = {}
+    for recording in recordings.values():
+        key = recording.experiment.get("id", recording.result["run"]["id"])
+        groups.setdefault(key, []).append(recording)
+    lines = [
+        "## Experiments",
+        "",
+        "One line per experiment. Rates are total Mbit/s over concurrent clients' common overlap, "
+        "not per-client rates.",
+        "",
+    ]
+    for members in sorted(
+        groups.values(), key=lambda group: min(r.result["run"]["created_at"] for r in group), reverse=True
+    ):
+        names = {r.name for r in members}
+        candidates = [(name, meta) for name, meta in reports.items() if names <= set(meta["recordings"])]
+        label = timestamp_name(min(r.result["run"]["created_at"] for r in members))
+        if candidates:
+            best, _ = min(candidates, key=lambda pair: (len(pair[1]["recordings"]), pair[0]))
+            link = f"reports/{best}/"
+        else:
+            link = f"runs/{min(members, key=lambda r: r.started).name}/"
+        summary = escape(experiment_summary(members), quote=False).replace("\n", " ")
+        lines.append(f"- [{label}]({link}) — {summary}")
+    return lines
+
+
 def index_markdown(recordings: dict[str, Recording], reports: dict[str, dict[str, Any]]) -> str:
     lines = [
         "# Gnosis VPN results",
         "",
         "Generated by `gnosis_vpn-bench results push`; do not edit by hand. Open a folder to see its "
         "rendered report; `report.html` in the same folder is the same report as one page.",
+        "",
+        "Folder timestamps use UTC (`YYYY-MM-DD--HH-MM-SS`): experiments/reports use creation time; recordings use "
+        "measurement start time, or creation time when the start is unknown. "
+        "Original IDs remain in result.json for provenance.",
+        "",
+        *_experiments(recordings, reports),
         "",
         "## Reports",
         "",
@@ -197,7 +290,9 @@ def scan(staged: list[Staged]) -> list[str]:
             shown = f"{item.folder}/{path}" if item.folder else path
             if not ALLOWED.fullmatch(path):
                 problems.append(f"{shown}: not an allowed file name")
-            problems += scan_text(shown, text, item.vm_ips)
+            if path.endswith(".png") != isinstance(text, PngChart):
+                problems.append(f"{shown}: PNG files require a generated chart source")
+            problems += scan_text(shown, text.source if isinstance(text, PngChart) else text, item.vm_ips)
     return problems
 
 
@@ -208,16 +303,27 @@ def write(repo: Path, staged: list[Staged]) -> list[str]:
     files are added, and the folders are updated for deletions only (old
     charts), so a stray untracked file in a folder is never committed.
     """
+    problems = scan(staged)
+    if problems:
+        raise ValueError("Refusing unsafe results: " + "; ".join(problems))
+    # Render before replacing any folders, so a missing converter keeps the old report intact.
+    rendered = [
+        {path: rasterize(value) if isinstance(value, PngChart) else value for path, value in item.files.items()}
+        for item in staged
+    ]
     written = []
-    for item in staged:
+    for item, files in zip(staged, rendered, strict=True):
         folder = repo / item.folder
         charts = folder / "charts"
         if charts.exists():
             shutil.rmtree(charts)  # charts are regenerated as a set
-        for path, text in item.files.items():
+        for path, text in files.items():
             target = folder / path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text)
+            if isinstance(text, bytes):
+                target.write_bytes(text)
+            else:
+                target.write_text(text)
             written.append(f"{item.folder}/{path}" if item.folder else path)
     return written
 

@@ -43,7 +43,7 @@ def test_repetitions_become_one_series_with_error_bar():
     assert (point.mean, point.low, point.high, len(point.values)) == (44, 40, 48, 3)
     assert series.missing_rungs() == [(2, "timeout")] * 3
     svg = overview_chart([series], FILE_THEME)
-    assert svg.count("<circle") == 1
+    assert svg.count("<circle") == 2  # data point and matching legend marker
     assert "H" in re.search(r'<path d="M[^"]+V[^"]+"', svg).group(0)  # whisker drawn
 
 
@@ -63,10 +63,10 @@ def test_markdown_has_sections_charts_and_no_zero_for_missing():
     text, charts = render_markdown(collection, extra_links=["[app](https://example.invalid)"])
     for heading in ("## 1. Concurrent bandwidth", "## 2. Per client", "## 3. Availability", "## 4. Provenance"):
         assert heading in text
-    assert "![Total Mbit/s" in text and "charts/overview.svg" in charts
+    assert "![Total Mbit/s" in text and "charts/overview.png" in charts
     assert all(path in text for path in charts)
     assert "not measured (timeout)" in text
-    assert 'fill="#ffffff"' in charts["charts/overview.svg"]  # own panel for GitHub dark mode
+    assert 'fill="#ffffff"' in charts["charts/overview.png"].source  # own panel for GitHub dark mode
 
 
 def test_html_collection_renders_both_locations():
@@ -88,7 +88,7 @@ def test_nice_scale_steps():
 
     assert nice_scale(23.26) == (30, 10) or nice_scale(23.26)[1] in (5, 10)
     top, step = nice_scale(23.26)
-    assert top >= 23.26 * 1.1 and (top / step) == round(top / step)
+    assert top - step <= 23.26 < top and (top / step) == round(top / step)
     assert nice_scale(0) == (1.0, 0.25)
     assert nice_scale(1820)[1] in (500, 1000)
 
@@ -105,7 +105,7 @@ def test_partial_failures_in_repetitions_are_shown():
     assert (point.values, point.missing, point.attempts) == ((50,), ("timeout", "timeout"), 3)
     text, charts = render_markdown(collection)
     assert "50.00; 2 of 3 not measured: timeout" in text
-    assert ">1/3</text>" in charts["charts/overview.svg"]
+    assert ">1/3</text>" in charts["charts/overview.png"].source
 
 
 def test_line_breaks_at_a_rung_nobody_measured():
@@ -124,7 +124,7 @@ def test_series_with_the_same_label_are_both_drawn():
     b = recording("b", address=AUSTRIA, label="GVPN-LT-1")
     series = Collection("t", [a, b]).series()
     assert len(series) == 2
-    assert overview_chart(series, FILE_THEME).count("<circle") == 2
+    assert overview_chart(series, FILE_THEME).count("<circle") == 4
 
 
 def test_markdown_escapes_html_from_data():

@@ -58,6 +58,13 @@ appear in `failures`.
 | `per_client` | array | One entry per client machine (or local host) |
 | `availability` | array | One row per exit check (sweep) |
 | `failures` | array | Everything that went wrong, with status |
+| `payment` | object, optional | Added by `recover`: `funded_wxHOPR`, `recovered_wxHOPR`, `spent_wxHOPR` (decimal strings), `pix`, `transferred_bytes` |
+| `warnings` | array, optional | `{code, detail}` a reader must see first; `pix_no_payment` when a PIX network carried traffic but nothing was spent |
+
+Which file has which shape: a run's `results/<target>/result.json` and a
+results-repo `runs/<name>/result.json` are this result (one recording). A
+repo `reports/<name>/report.json` is a report over several recordings and
+has no `rungs` of its own; read the recordings it lists.
 
 ### `run`
 
@@ -69,6 +76,15 @@ appear in `failures`.
 | `reproducible` | bool | `false` for imported historical data whose raw inputs are incomplete |
 | `notes` | string | Free text; may be empty |
 | `historical_source` | string or null (optional) | Origin of imported data |
+| `experiment` | object (optional) | `id`, `cycle`, `cycles`, `position`, `targets`; cycle and exit position are one-based positive integers bounded by their totals |
+
+`experiment` identifies a recording's place in a multi-exit, repeated experiment.
+Each recording still holds exactly one exit's ladder from one cycle. The report
+orders recordings by experiment, cycle and exit position. Completed archive
+folders use the recording's UTC start time as `YYYY-MM-DD--HH-MM-SS`;
+recordings without a start time use creation time. Live experiment slots
+use distinct creation-time/cycle names while pending. Renamed archive folders
+are matched by original run, target, profile and cycle on later pushes.
 
 ### `provenance`
 
@@ -87,6 +103,17 @@ appear in `failures`.
 | `infrastructure.machines[]` | `role` (`origin`/`client`), `name`, `size`, `vcpus`, `memory_mib`, `cpu_model`, `os`, `kernel` |
 | `client_config_sha256` | Optional; hash of an uploaded client config |
 
+Each machine can also record `architecture`, `cpu_vendor`, `cpu_sockets`,
+`cores_per_socket`, `threads_per_core`, `hypervisor`, `root_disk_gib`,
+`root_free_gib`, `swap_mib`, `package_version` and `ctl_version`. These fields
+are optional and nullable for older recordings. Disk sizes describe the root
+filesystem, not the physical host's disk. Machine facts contain no IP addresses,
+hostnames, credentials or provider account identifiers.
+
+Reports list every origin and client. Identical machine facts are shown once
+within a run; the same client name in different runs does not identify the same
+machine.
+
 ### `concurrent`
 
 | Key | Notes |
@@ -97,6 +124,7 @@ appear in `failures`.
 | `spec.ping_target`, `spec.ping_interval_s` | `9.9.9.9`, 1 s |
 | `origin` | `{bytes, sha256}` of the served file |
 | `baseline[]` | Direct, non-VPN downloads: `{client, mbps, bytes}`. An origin-capacity check, not a VPN result |
+| `idle_ping[]` | Optional; unloaded ping through each connected client's tunnel before rung 1, all clients at once: `{client, sent, received, loss_pct, min_ms, mean_ms, max_ms, status}`, `status` `measured` or `no_reply` (RTTs `null`) |
 | `rungs[]` | See below |
 
 Each rung:
@@ -108,10 +136,11 @@ Each rung:
 | `status` | `measured`, `failed` or `not_run` |
 | `failure_status` | From the fixed list; required unless `measured` |
 | `detail` | Optional; why an unmeasured rung has no data, or a note on a measured one (e.g. a client reconnected before it) |
+| `connection_check` | Optional; taken right before the rung (after any reconnect): `at`, `clients_total` (the run's clients), `clients_connected` and `connected[]` (connected to the target then; clients that never connected count as not connected), `exit_slots_total`, `exit_slots_in_use`, `exit_slots_free` and `probe_age_s` from the freshest exit probe a connected client holds (`null` without one). Absent for `not_run` rungs and in older results |
 | `total_mbps` | Sum of per-client overlap rates; `null` unless `measured` |
 | `overlap_s`, `start_skew_ms`, `gap_before_s` | Overlap length, spread of start times, actual gap since the previous rung |
 | `overlap_start`, `overlap_end` | Optional timestamps |
-| `per_client[]` | `client`, `mbps`, `overlap_bytes`, `downloaded_bytes`, `complete`, `sha256_verified`, `timed_out`, `ping_mean_ms`, `ping_loss_pct`, optional `ping_sent`, `ping_received`, `timeseries` (`{t_s[], mbps[], rtt_ms[]}`, per second since the scheduled start; `null` entries are gaps) |
+| `per_client[]` | `client`, `mbps`, `overlap_bytes`, `downloaded_bytes`, `complete`, `sha256_verified`, `timed_out`, `ping_mean_ms`, `ping_loss_pct`, optional `ping_sent`, `ping_received`, `system` (client host load during the transfer: `cpu_mean_pct`, `cpu_max_pct` (busy share of all vCPUs, idle and iowait count as idle), `mem_available_min_mib`, `load1_max`; `null` without host samples), `timeseries` (`{t_s[], mbps[], rtt_ms[]}` plus, when host samples exist, `cpu_pct[]`, `mem_available_mib[]`, `load1[]`; per second since the scheduled start; `null` entries are gaps) |
 
 ### `per_client[]`
 
@@ -146,6 +175,10 @@ builds. Order by `run.started_at`. Within a ladder, compare
 `concurrent.rungs[].total_mbps` per `rung`; never compare availability-check
 rates with ladder rates.
 
+The overview groups repetitions only when their measurement specification,
+infrastructure provider and region also match. Different transfer sizes,
+deadlines, gaps or ping settings form separate series rather than a mixed mean.
+
 ## Files in the results repository
 
 `results push` writes generated files only; run state never leaves the run
@@ -153,8 +186,8 @@ directory.
 
 | Folder | Files |
 |--------|-------|
-| `runs/<YYYY-MM-DD>-<HHMMSS>Z-<target>-<profile>/` (one recording) | `result.json`, `provenance.json`, `report.html`, `README.md`, `charts/*.svg` |
-| `reports/<name>/` (one or more recordings) | `report.json` (`title`, `recordings` = folder names under `runs/`, `links`), `report.html`, `README.md`, `charts/*.svg` |
+| `runs/YYYY-MM-DD--HH-MM-SS/` (one recording) | `result.json`, `provenance.json`, `report.html`, `README.md`, `charts/*.png` |
+| `reports/<name>/` (one or more recordings) | `report.json` (`title`, `recordings` = folder names under `runs/`, `links`), `report.html`, `README.md`, `charts/*.png` |
 | repository root | `README.md`, the index of all reports and recordings |
 
 Never published: `run.toml`, `state/`, `data/`, logs, keys, backups.

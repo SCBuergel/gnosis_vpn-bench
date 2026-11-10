@@ -2,7 +2,15 @@
 
 import pytest
 
-from gvpn_bench.remote.analysis import NoOverlapError, counter_at, per_second_mbps, summarize, timeseries
+from gvpn_bench.remote.analysis import (
+    NoOverlapError,
+    counter_at,
+    cpu_busy_pct,
+    per_second_mbps,
+    summarize,
+    system_summary,
+    timeseries,
+)
 
 
 def item(start, end, events, nbytes, **extra):
@@ -75,3 +83,36 @@ def test_timeseries_places_pings_by_second():
     series = timeseries(data)
     assert series["rtt_ms"] == [10, None]
     assert len(series["mbps"]) == 2
+
+
+def cpu_line(busy, idle, iowait=0):
+    # user nice system idle iowait irq softirq steal guest guest_nice
+    return [busy, 0, 0, idle, iowait, 0, 0, 0, 0, 0]
+
+
+def test_cpu_busy_counts_iowait_as_idle_and_rejects_bad_lines():
+    assert cpu_busy_pct(cpu_line(0, 0), cpu_line(30, 60, 10)) == 30.0
+    assert cpu_busy_pct(cpu_line(5, 5), cpu_line(5, 5)) is None
+    assert cpu_busy_pct(None, cpu_line(1, 1)) is None
+    assert cpu_busy_pct([1, 2, 3], [4, 5, 6]) is None
+
+
+def test_system_summary_and_per_second_host_series():
+    data = item(0, 3, [[0, 0], [3, 375_000]], 375_000, scheduled_start=0)
+    data["samples"] = [
+        {"at": 0.0, "cpu": cpu_line(0, 0), "mem_available_kib": 4096 * 1024, "load1": 0.5},
+        {"at": 1.0, "cpu": cpu_line(10, 90), "mem_available_kib": 3072 * 1024, "load1": 0.8},
+        {"at": 2.0, "cpu": cpu_line(60, 140), "mem_available_kib": 3584 * 1024, "load1": 1.25},
+    ]
+    summary = system_summary(data)
+    assert summary == {"cpu_mean_pct": 30.0, "cpu_max_pct": 50.0, "mem_available_min_mib": 3072.0, "load1_max": 1.25}
+    series = timeseries(data)
+    assert series["cpu_pct"] == [None, 10.0, 50.0]
+    assert series["mem_available_mib"] == [4096.0, 3072.0, 3584.0]
+    assert series["load1"] == [0.5, 0.8, 1.25]
+
+
+def test_no_host_samples_means_null_system_and_no_host_series():
+    data = item(0, 2, [[0, 0], [2, 250_000]], 250_000, scheduled_start=0)
+    assert system_summary(data) is None
+    assert "cpu_pct" not in timeseries(data)

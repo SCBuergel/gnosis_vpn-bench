@@ -1,0 +1,51 @@
+# Packaged jura-prod config (client 0.97.0) with the Berlin exit added.
+# Uses the same strategy and path planner as the Lisbon and Serbia tests.
+version = 6
+
+[destinations.USA]
+address = "0x7220CfE91F369bfE79F883c2891e97407D7a4D48"
+meta = { location = "Omaha", flag = "US" }
+
+[destinations.UK]
+address = "0xcD9D0E23cD999dFC0D1400D837F8e612DbbbDFAA"
+meta = { location = "London", flag = "GB" }
+
+[destinations.Netherlands]
+address = "0x00d7096439d1f731c73574Adb7E4A9f3B7775326"
+meta = { location = "Amsterdam", flag = "NL" }
+
+[destinations.Brazil]
+address = "0x12b78461da59E8317C61bD249EA0DEA2aA9527de"
+meta = { location = "Sao Paulo", flag = "BR" }
+
+[destinations.India]
+address = "0x1062696f8eec5b71bfa6be7e52df1d7457428106"
+meta = { location = "Mumbai", flag = "IN" }
+
+[destinations.Australia]
+address = "0x64885d2d2bc9df7b415aac184e020c632d715dff"
+meta = { location = "Sydney", flag = "AU" }
+
+[destinations."South Korea"]
+address = "0xd8efe2ebe14c8cc193d5a9f5afd81276549fad67"
+meta = { location = "Seoul", flag = "KR" }
+
+# 16-core node, 16 peer limit
+[destinations.Austria]
+address = "0x210a14012535321b919653fdee8c2d5971b0e534"
+meta = { location = "Vienna", flag = "AT" }
+
+[strategy]
+channel_capacity = "480 MiB"
+topup_capacity = "480 MiB"
+lower_capacity_threshold = "128 MiB"
+min_safe_capacity_required = "384 MiB"
+sizing_mode = "deterministic"
+
+[connection.path_planner]
+# Prune to the 3 fastest candidate paths; the client preset keeps every relayer (0).
+min_paths_anonymity_floor = 3
+
+[destinations.Berlin]
+address = "0xf8acd6fafad975bca11a997316578883f0ee2240"
+meta = { location = "Berlin", flag = "DE" }

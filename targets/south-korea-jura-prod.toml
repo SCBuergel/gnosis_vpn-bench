@@ -1,0 +1,5 @@
+label = "South Korea"
+exit_address = "0xd8efe2ebe14c8cc193d5a9f5afd81276549fad67"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Seoul"

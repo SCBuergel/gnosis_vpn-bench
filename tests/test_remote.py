@@ -176,7 +176,25 @@ def test_rung_entry_verifies_hash_and_handles_no_overlap():
 def test_build_result_from_state_is_valid(run):
     write_private_json(
         run.state / "machines.json",
-        [{"role": "client", "name": "client1", "size": "c-4", "vcpus": 4, "ctl_version": "0.101.1"}],
+        [
+            {
+                "role": "client",
+                "name": "client1",
+                "size": "c-4",
+                "vcpus": 4,
+                "ctl_version": "0.101.1",
+                "architecture": "x86_64",
+                "cpu_vendor": "GenuineIntel",
+                "cpu_sockets": 1,
+                "cores_per_socket": 2,
+                "threads_per_core": 2,
+                "hypervisor": "KVM",
+                "root_disk_gib": 80.0,
+                "root_free_gib": 70.0,
+                "swap_mib": 0,
+                "ip": "203.0.113.9",
+            }
+        ],
     )
     write_private_json(
         run.state / "ladder-kaunas.json",
@@ -218,6 +236,10 @@ def test_build_result_from_state_is_valid(run):
     assert result["run"]["kind"] == "ladder"
     statuses = {f["status"] for f in result["failures"]}
     assert statuses == {"not_run", "UnacceptablePixParams"}
+    machine = result["provenance"]["infrastructure"]["machines"][0]
+    assert machine["architecture"] == "x86_64" and machine["cpu_vendor"] == "GenuineIntel"
+    assert machine["threads_per_core"] == 2 and machine["root_disk_gib"] == 80.0
+    assert machine["ctl_version"] == "0.101.1" and "ip" not in machine
 
 
 def test_install_script_takes_values_as_arguments():

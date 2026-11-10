@@ -14,6 +14,10 @@ Before every rung each client must still be connected to the target exit.
 A client that dropped is reconnected once (``reconnect``); if that fails,
 the rung is ``failed`` and later rungs are ``not_run``. Nothing is measured
 through another exit or without the tunnel.
+
+Each attempted rung records ``connection_check``: how many of the run's
+clients were connected to the target right before it, and the exit's own
+slot counts from the freshest probe a connected client holds.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from typing import Any, TypeVar
 from ..host import Host, read_file, write_file
 from ..profiles import Profile, Target
 from ..runs import LadderSpec, Run
-from .analysis import NoOverlapError, summarize, timeseries
+from .analysis import NoOverlapError, summarize, system_summary, timeseries
 from .connect import vpn_for
 from .provision import REMOTE_DIR
 
@@ -53,6 +57,54 @@ def still_connected(host: Host, profile: Profile, target: Target) -> bool:
         return False
     destination = status.find_by_address(target.exit_address)
     return destination is not None and status.connected_id == destination.id
+
+
+def connection_state(host: Host, profile: Profile, target: Target) -> tuple[bool, dict[str, Any] | None]:
+    """(connected to the target, the client's latest exit probe)."""
+    status = vpn_for(host, profile).try_status()
+    if status is None:
+        return False, None
+    destination = status.find_by_address(target.exit_address)
+    if destination is None or status.connected_id != destination.id:
+        return False, None
+    return True, status.probe
+
+
+def connection_check(
+    hosts: list[Host], unavailable: dict[str, str], profile: Profile, target: Target
+) -> dict[str, Any]:
+    """Who is connected to the target now, and the exit's slots as last probed.
+
+    Clients that never connected (*unavailable*) count as not connected.
+    Exit slot values are ``null`` when no connected client holds a probe.
+    """
+    states: dict[str, tuple[bool, dict[str, Any] | None]] = {}
+    if hosts:
+        try:
+            states = parallel(partial(connection_state, profile=profile, target=target), hosts)
+        except (OSError, RuntimeError, ValueError) as error:
+            log.warning("connection check failed: %s", error)
+    connected = sorted(name for name, (ok, _) in states.items() if ok)
+    probes = [probe for ok, probe in states.values() if ok and probe]
+    freshest = max(probes, key=lambda p: p.get("checked_at") or 0, default=None)
+    slots = ((freshest or {}).get("load") or {}).get("slots") or {}
+    checked_ms = (freshest or {}).get("checked_at")
+    now = time.time()
+
+    def count(key: str) -> int | None:
+        value = slots.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    return {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+        "clients_total": len(hosts) + len(unavailable),
+        "clients_connected": len(connected),
+        "connected": connected,
+        "exit_slots_total": count("total"),
+        "exit_slots_in_use": count("connected"),
+        "exit_slots_free": count("available"),
+        "probe_age_s": round(now - checked_ms / 1000, 1) if isinstance(checked_ms, (int, float)) else None,
+    }
 
 
 def remote_dir(attempt: str, rung: int) -> str:
@@ -152,6 +204,7 @@ def rung_entry(
                 "ping_loss_pct": metrics["ping_loss_pct"],
                 "ping_sent": metrics["ping_sent"],
                 "ping_received": metrics["ping_received"],
+                "system": system_summary(item),
                 "timeseries": timeseries(item),
             }
         )
@@ -188,6 +241,17 @@ def check_connected(
     return lost, [name for name, ok in retried.items() if ok]
 
 
+def new_attempt(data_dir: Path) -> str:
+    """A UTC timestamp naming this ladder pass, unique among *data_dir*'s raw-data folders."""
+    base = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    attempt, suffix = base, 1
+    while (data_dir / attempt).exists():
+        suffix += 1
+        attempt = f"{base}-{suffix}"
+    (data_dir / attempt).mkdir(parents=True)
+    return attempt
+
+
 def run_ladder(
     run: Run,
     profile: Profile,
@@ -209,7 +273,7 @@ def run_ladder(
     spec = run.config.ladder
     data_dir = data_dir or run.data
     data_dir.mkdir(parents=True, exist_ok=True)
-    attempt = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    attempt = new_attempt(data_dir)
     rungs: list[dict[str, Any]] = []
     raw_by_rung: dict[int, dict[str, dict[str, Any]]] = {}
     previous_end: float | None = None
@@ -227,14 +291,22 @@ def run_ladder(
             detail = f"only {len(client_hosts)} client(s) connected to the target ({causes})"
             log.error("rung %d: %s", rung, detail)
             rungs.append(empty_rung(rung, names, "failed", status, detail))
+            rungs[-1]["connection_check"] = connection_check(client_hosts, unavailable, profile, target)
             continue
         lost, reconnected = check_connected(hosts, profile, target, reconnect)
+        snapshot = connection_check(client_hosts, unavailable, profile, target)
+        log.info(
+            "rung %d: %d of %d clients connected; exit slots %s/%s in use",
+            rung, snapshot["clients_connected"], snapshot["clients_total"],
+            snapshot["exit_slots_in_use"], snapshot["exit_slots_total"],
+        )  # fmt: skip
         if lost:
             log.error("rung %d: not connected to the target: %s", rung, ", ".join(lost))
             detail = f"not connected to the target: {', '.join(lost)}"
             if reconnect is not None:
                 detail += " (one reconnect attempt failed)"
             rungs.append(empty_rung(rung, names, "failed", "timeout", detail))
+            rungs[-1]["connection_check"] = snapshot
             continue
         start_at = next_start if next_start is not None else time.time() + FIRST_RUNG_LEAD_S
         if reconnected:
@@ -243,6 +315,7 @@ def run_ladder(
         if start_at - time.time() < MIN_LEAD_S:
             log.error("rung %d: too late to keep the %ss gap", rung, spec.gap_s)
             rungs.append(empty_rung(rung, names, "failed", "error", "too late to keep the inter-rung gap"))
+            rungs[-1]["connection_check"] = snapshot
             continue
         try:
             parallel(
@@ -251,6 +324,7 @@ def run_ladder(
             )
         except RuntimeError as error:
             rungs.append(empty_rung(rung, names, "failed", "error", str(error)[:300]))
+            rungs[-1]["connection_check"] = snapshot
             continue
         log.info("rung %d scheduled for %.3f with %s", rung, start_at, names)
         give_up = start_at + spec.deadline_s + COLLECT_GRACE_S
@@ -259,6 +333,7 @@ def run_ladder(
         if missing:
             detail = f"no result from {', '.join(missing)} (agent failed or SSH lost)"
             rungs.append(empty_rung(rung, names, "failed", "error", detail))
+            rungs[-1]["connection_check"] = snapshot
             continue
         raw = {name: item for name, item in collected.items() if item is not None}
         last_end = max(item["end"] for item in raw.values())
@@ -268,11 +343,21 @@ def run_ladder(
         previous_end = last_end
         raw_by_rung[rung] = raw
         rungs.append(rung_entry(rung, raw, origin_sha256, gap))
+        rungs[-1]["connection_check"] = snapshot
         if reconnected:
             note = f"reconnected before this rung: {', '.join(reconnected)}"
             rungs[-1]["detail"] = f"{rungs[-1]['detail']}; {note}" if rungs[-1]["detail"] else note
         log.info("rung %d: %s Mbit/s", rung, rungs[-1]["total_mbps"])
-    # All rungs done: now fetch the complete ping logs and recompute.
+        for client in rungs[-1]["per_client"]:
+            log.info(
+                "rung %d %s: %s Mbit/s, %s bytes, complete %s, ping %s ms",
+                rung, client["client"], client["mbps"], client["downloaded_bytes"], client["complete"],
+                round(client["ping_mean_ms"]) if client["ping_mean_ms"] is not None else "n/a",
+            )  # fmt: skip
+    # All rungs done: now fetch the complete ping logs and recompute. Raw data
+    # goes to one folder per ladder attempt so a later pass never overwrites it.
+    attempt_dir = data_dir / attempt
+    attempt_dir.mkdir(parents=True, exist_ok=True)
     for position, rung in enumerate(spec.rungs):
         raw = raw_by_rung.get(rung)
         if not raw:
@@ -281,8 +366,10 @@ def run_ladder(
             pings = fetch_pings(host, attempt, rung)
             if pings is not None:
                 raw[host.name]["pings"] = pings
-            (data_dir / f"rung{rung}-{host.name}.json").write_text(json.dumps(raw[host.name]))
-        detail = rungs[position]["detail"]
-        rungs[position] = rung_entry(rung, raw, origin_sha256, rungs[position]["gap_before_s"])
-        rungs[position]["detail"] = detail
+            (attempt_dir / f"rung{rung}-{host.name}.json").write_text(json.dumps(raw[host.name]))
+        previous = rungs[position]
+        rungs[position] = rung_entry(rung, raw, origin_sha256, previous["gap_before_s"])
+        rungs[position]["detail"] = previous["detail"]
+        if "connection_check" in previous:
+            rungs[position]["connection_check"] = previous["connection_check"]
     return rungs

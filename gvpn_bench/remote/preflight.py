@@ -9,6 +9,10 @@ on the network at all. For each target:
   node must also announce a ``gvpn:exit`` service, because that is the
   only way a v5 client learns about an exit.
 
+The pinned package URL must also answer, so a package that left its
+download location fails here and not after the droplets exist
+(``package_problems``).
+
 Free slots and a live probe are only visible to a running client; the
 connect step handles those (``connect.free_slots``).
 """
@@ -16,6 +20,7 @@ connect step handles those (``connect.free_slots``).
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
@@ -23,6 +28,7 @@ from typing import Any
 from ..profiles import Profile, Target
 
 Query = Callable[[str, str], dict[str, Any]]
+Head = Callable[[str], int]
 
 _ACCOUNT_FIELDS = "{__typename ... on AccountsList{accounts{chainKey multiAddresses}}}"
 # Newer indexers return a union for ``services``; older ones the list type directly.
@@ -97,3 +103,28 @@ def check(
     except (OSError, ValueError, PreflightError) as error:
         problems.append(f"indexer {indexer} unusable: {error}")
     return problems
+
+
+def head_status(url: str) -> int:
+    """HTTP status of a HEAD request, following redirects (GitHub release assets redirect)."""
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "gnosis_vpn-bench"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as error:
+        return int(error.code)
+
+
+def package_problems(profile: Profile, head: Head | None = None) -> list[str]:
+    """Problems with the profile's pinned package download; empty if it answers 200."""
+    url = profile.package.url
+    if not url:
+        return []
+    head = head or head_status
+    try:
+        status = head(str(url))
+    except (OSError, ValueError) as error:
+        return [f"package {url} unreachable: {error}"]
+    if status != 200:
+        return [f"package {url} answered HTTP {status}; update the pin in profiles/{profile.name}.toml"]
+    return []

@@ -1,8 +1,8 @@
-"""Render a report as GitHub Markdown plus standalone SVG charts.
+"""Render a report as GitHub Markdown plus high-resolution PNG charts.
 
 GitHub shows a folder's README.md rendered, including relative images,
 in private repositories and in its mobile app; it never renders .html.
-So every report folder gets ``README.md`` and ``charts/*.svg`` next to
+So every report folder gets ``README.md`` and ``charts/*.png`` next to
 ``report.html``.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from html import escape
 
-from .charts import FILE_THEME
+from .charts import FILE_THEME, PngChart
 from .collection import Collection
 from .report_model import Block, Chart, Heading, Paragraph, Table, build, fmt, subtitle
 
@@ -33,10 +33,10 @@ def _table(block: Table) -> str:
     return "\n".join(lines)
 
 
-def render_markdown(collection: Collection, extra_links: list[str] | None = None) -> tuple[str, dict[str, str]]:
-    """Return (README.md text, {relative path: SVG text})."""
-    charts: dict[str, str] = {}
-    parts = [f"# {collection.title}", "", subtitle(collection), ""]
+def render_markdown(collection: Collection, extra_links: list[str] | None = None) -> tuple[str, dict[str, PngChart]]:
+    """Return README text and scannable chart sources for PNG publication."""
+    charts: dict[str, PngChart] = {}
+    parts = [f"# {_text(collection.title)}", "", _text(subtitle(collection)), ""]
     if any(not r.result["run"]["reproducible"] for r in collection.recordings):
         parts += ["> Includes historical data that cannot be reproduced exactly.", ""]
     if extra_links:
@@ -47,10 +47,10 @@ def render_markdown(collection: Collection, extra_links: list[str] | None = None
     return "\n".join(parts) + "\n", charts
 
 
-def _block(block: Block, charts: dict[str, str]) -> str:
+def _block(block: Block, charts: dict[str, PngChart]) -> str:
     if isinstance(block, Heading):
-        anchor = f'<a id="{block.anchor}"></a>\n' if block.anchor else ""
-        return f"{anchor}{'#' * block.level} {block.text}"
+        anchor = f'<a id="{escape(block.anchor, quote=True)}"></a>\n' if block.anchor else ""
+        return f"{anchor}{'#' * block.level} {_text(block.text)}"
     if isinstance(block, Paragraph):
         text = _text(block.text)
         return f"_{text}_" if block.muted else f"**{text}**" if block.warn else text
@@ -60,7 +60,8 @@ def _block(block: Block, charts: dict[str, str]) -> str:
         svg = block.draw(FILE_THEME)
         if not svg:
             return ""
-        path = f"{CHART_DIR}/{block.name}.svg"
-        charts[path] = svg
-        return f"![{block.alt}]({path})"
+        path = f"{CHART_DIR}/{block.name}.png"
+        charts[path] = PngChart(svg)
+        alt = _text(block.alt).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("\n", " ")
+        return f"![{alt}]({path})"
     raise TypeError(block)

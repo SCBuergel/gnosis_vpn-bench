@@ -12,6 +12,7 @@ events; before the first event it is 0 and after the last it stays flat.
 
 from __future__ import annotations
 
+import itertools
 from bisect import bisect_right
 from typing import Any
 
@@ -95,4 +96,56 @@ def timeseries(item: dict[str, Any]) -> dict[str, list[Any]]:
         index = int(ping["sent_at"] - origin)
         if 0 <= index < len(rtt):
             rtt[index] = ping["rtt_ms"]
-    return {"t_s": times, "mbps": [round(r, 3) if r is not None else None for r in rates], "rtt_ms": rtt}
+    series: dict[str, list[Any]] = {
+        "t_s": times,
+        "mbps": [round(r, 3) if r is not None else None for r in rates],
+        "rtt_ms": rtt,
+    }
+    samples = item.get("samples") or []
+    if samples:
+        cpu: list[float | None] = [None] * len(times)
+        mem: list[float | None] = [None] * len(times)
+        load: list[float | None] = [None] * len(times)
+        for previous, sample in itertools.pairwise(samples):
+            index = int(sample["at"] - origin)
+            if 0 <= index < len(times):
+                cpu[index] = cpu_busy_pct(previous.get("cpu"), sample.get("cpu"))
+        for sample in samples:
+            index = int(sample["at"] - origin)
+            if 0 <= index < len(times):
+                if isinstance(sample.get("mem_available_kib"), (int, float)):
+                    mem[index] = round(sample["mem_available_kib"] / 1024, 1)
+                if isinstance(sample.get("load1"), (int, float)):
+                    load[index] = round(sample["load1"], 2)
+        series.update(cpu_pct=cpu, mem_available_mib=mem, load1=load)
+    return series
+
+
+def cpu_busy_pct(before: list[int] | None, after: list[int] | None) -> float | None:
+    """Busy share of all CPUs between two ``/proc/stat`` cpu lines (idle and iowait count as idle)."""
+    if not before or not after or len(before) < 5 or len(after) != len(before):
+        return None
+    # guest and guest_nice (fields 9, 10) are already included in user and nice.
+    total = sum(after[:8]) - sum(before[:8])
+    idle = (after[3] + after[4]) - (before[3] + before[4])
+    if total <= 0:
+        return None
+    return round(100 * (total - idle) / total, 1)
+
+
+def system_summary(item: dict[str, Any]) -> dict[str, float | None] | None:
+    """Host load on the client during its transfer, from the agent's per-second samples."""
+    samples = item.get("samples") or []
+    if len(samples) < 2:
+        return None
+    busy = [cpu_busy_pct(a.get("cpu"), b.get("cpu")) for a, b in itertools.pairwise(samples)]
+    busy_values = [value for value in busy if value is not None]
+    first, last = samples[0].get("cpu"), samples[-1].get("cpu")
+    mem = [s["mem_available_kib"] / 1024 for s in samples if isinstance(s.get("mem_available_kib"), (int, float))]
+    load = [s["load1"] for s in samples if isinstance(s.get("load1"), (int, float))]
+    return {
+        "cpu_mean_pct": cpu_busy_pct(first, last),
+        "cpu_max_pct": max(busy_values) if busy_values else None,
+        "mem_available_min_mib": round(min(mem), 1) if mem else None,
+        "load1_max": round(max(load), 2) if load else None,
+    }

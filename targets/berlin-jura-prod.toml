@@ -1,0 +1,7 @@
+label = "Berlin"
+exit_address = "0xf8acd6fafad975bca11a997316578883f0ee2240"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Berlin"
+notes = "User-supplied exit address; registered and announced on jura-prod on 2026-10-31."
+client_config = "client-configs/v4-jura-prod-with-berlin.toml"

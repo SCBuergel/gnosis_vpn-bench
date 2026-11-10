@@ -91,7 +91,7 @@ def test_missing_client_result_fails_the_rung_and_keeps_earlier_ones(run, monkey
     assert [r["status"] for r in rungs] == ["measured", "failed", "not_run"]
     assert rungs[0]["total_mbps"] is not None
     assert rungs[1]["failure_status"] == "error" and "client2" in rungs[1]["detail"]
-    assert (run.data / "rung1-client1.json").exists()
+    assert len(list(run.data.glob("*/rung1-client1.json"))) == 1
 
 
 def test_disconnected_client_fails_rung(run, monkeypatch):

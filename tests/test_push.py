@@ -7,6 +7,7 @@ import pytest
 from sample_result import sample_result
 
 from gvpn_bench.results import publish, push
+from gvpn_bench.results.charts import PngChart
 from gvpn_bench.results.store import write_report, write_result
 
 
@@ -39,11 +40,51 @@ def test_scan_flags_keys_tokens_and_ips():
 
 def test_recording_folder_holds_only_generated_allowlisted_files(tmp_path):
     staged = publish.stage_recording(make_run(tmp_path))
-    assert staged.folder == "runs/2026-11-01-123000Z-kaunas-v5-piz-palu-dev"
-    assert {"result.json", "provenance.json", "report.html", "README.md", "charts/overview.svg"} <= set(staged.files)
+    assert staged.folder == "runs/2026-11-01--12-30-00"
+    assert {"result.json", "provenance.json", "report.html", "README.md", "charts/overview.png"} <= set(staged.files)
     assert all(publish.ALLOWED.fullmatch(path) for path in staged.files)
     assert not any("id_ed25519" in path or path.endswith(".log") for path in staged.files)
     assert publish.scan([staged]) == []
+
+
+def test_png_source_is_scanned_before_rasterization(tmp_path, monkeypatch):
+    chart = PngChart("<svg><text>-----BEGIN OPENSSH PRIVATE KEY-----</text></svg>")
+    staged = publish.Staged("reports/r", {"charts/overview.png": chart})
+    monkeypatch.setattr(publish, "rasterize", lambda chart: pytest.fail("unsafe source must not be rendered"))
+    assert any("private key" in problem for problem in publish.scan([staged]))
+    with pytest.raises(ValueError, match="unsafe results"):
+        publish.write(tmp_path, [staged])
+    assert not (tmp_path / "reports").exists()
+
+
+def test_failed_rasterization_preserves_existing_charts(tmp_path, monkeypatch):
+    old = tmp_path / "reports/r/charts/old.svg"
+    old.parent.mkdir(parents=True)
+    old.write_text("previous chart")
+
+    def unavailable(chart):
+        raise RuntimeError("missing converter")
+
+    monkeypatch.setattr(publish, "rasterize", unavailable)
+    staged = publish.Staged("reports/r", {"charts/new.png": PngChart("<svg/>")})
+    with pytest.raises(RuntimeError, match="missing converter"):
+        publish.write(tmp_path, [staged])
+    assert old.read_text() == "previous chart"
+
+
+def test_png_replaces_svg_and_is_written_as_binary(tmp_path):
+    old = tmp_path / "reports/r/charts/old.svg"
+    old.parent.mkdir(parents=True)
+    old.write_text("<svg/>")
+    staged = publish.Staged("reports/r", {"charts/new.png": PngChart("<svg/>")})
+    publish.write(tmp_path, [staged])
+    assert not old.exists()
+    assert (old.parent / "new.png").read_bytes().startswith(b"\x89PNG")
+
+
+def test_arbitrary_png_payload_is_refused():
+    staged = publish.Staged("reports/r", {"charts/raw.png": "not a generated chart"})
+    assert any("generated chart source" in problem for problem in publish.scan([staged]))
 
 
 def test_vm_ip_anywhere_in_staged_files_is_refused(tmp_path):
@@ -122,7 +163,7 @@ def test_same_day_runs_get_separate_folders():
     second = sample_result()
     second["run"]["started_at"] = "2026-11-01T15:04:05Z"
     assert push.destination_name(first) != push.destination_name(second)
-    assert push.destination_name(second) == "2026-11-01-150405Z-kaunas-v5-piz-palu-dev"
+    assert push.destination_name(second) == "2026-11-01--15-04-05"
 
 
 def test_scan_sees_through_markdown_emphasis():
@@ -260,3 +301,8 @@ def test_push_does_not_ask_by_default_and_keeps_links(tmp_path, monkeypatch, cap
     assert runcli.cmd_results_push(ns(report_name="r1", ask=True)) == 0
     assert asked
     capsys.readouterr()
+
+
+@pytest.fixture(autouse=True)
+def fake_rasterizer(monkeypatch):
+    monkeypatch.setattr(publish, "rasterize", lambda chart: b"\x89PNG\r\n\x1a\n" + chart.source.encode())

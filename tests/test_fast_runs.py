@@ -112,6 +112,7 @@ def test_one_refusal_with_free_slots_keeps_waiting(fast_clock):
 def fake_ladder(monkeypatch, connected):
     base = time.time() + 100
     monkeypatch.setattr(ladder, "still_connected", lambda host, profile, target: connected(host))
+    monkeypatch.setattr(ladder, "connection_state", lambda host, profile, target: (connected(host), None))
     monkeypatch.setattr(ladder, "launch", lambda host, **kwargs: None)
     monkeypatch.setattr(
         ladder,
@@ -209,6 +210,7 @@ def test_step_ladder_passes_only_connected_clients(run, monkeypatch):
         return []
 
     monkeypatch.setattr(steps, "run_ladder", fake_run_ladder)
+    monkeypatch.setattr(steps, "idle_ping", lambda hosts, target: [])
     steps.step_ladder(run, run.config.profile(), run.config.target())
     assert seen["names"] == ["client1", "client2"]
     assert seen["unavailable"] == {"client3": "http_404_register"}
@@ -364,3 +366,71 @@ def test_reconnect_note_keeps_a_failure_detail(run, monkeypatch):
         run, run.config.profile(), run.config.target(), hosts("client1"), "192.0.2.1", "aa", reconnect=reconnect
     )
     assert rungs[0]["detail"] == "no common interval; reconnected before this rung: client1"
+
+
+# -- connection check before each rung -----------------------------------------------------------
+
+
+def test_connection_check_counts_clients_and_reads_the_freshest_probe(run, monkeypatch):
+    now_ms = time.time() * 1000
+    probes = {
+        "client1": {"checked_at": now_ms - 30_000, "load": {"slots": {"total": 2, "connected": 1, "available": 1}}},
+        "client2": {"checked_at": now_ms - 5_000, "load": {"slots": {"total": 2, "connected": 2, "available": 0}}},
+    }
+    monkeypatch.setattr(
+        ladder, "connection_state", lambda host, profile, target: (host.name in probes, probes.get(host.name))
+    )
+    check = ladder.connection_check(
+        hosts("client1", "client2", "client3"),
+        {"client4": "http_404_register"},
+        run.config.profile(),
+        run.config.target(),
+    )
+    assert check["clients_total"] == 4
+    assert check["clients_connected"] == 2
+    assert check["connected"] == ["client1", "client2"]
+    assert (check["exit_slots_total"], check["exit_slots_in_use"], check["exit_slots_free"]) == (2, 2, 0)
+    assert 4 <= check["probe_age_s"] <= 10
+
+
+def test_connection_check_without_probe_or_clients_is_null_not_zero(run, monkeypatch):
+    monkeypatch.setattr(ladder, "connection_state", lambda host, profile, target: (True, None))
+    check = ladder.connection_check(hosts("client1"), {}, run.config.profile(), run.config.target())
+    assert check["clients_connected"] == 1
+    assert check["exit_slots_in_use"] is None and check["probe_age_s"] is None
+    empty = ladder.connection_check([], {"client1": "timeout"}, run.config.profile(), run.config.target())
+    assert (empty["clients_total"], empty["clients_connected"]) == (1, 0)
+
+
+def test_every_attempted_rung_keeps_its_connection_check(run, monkeypatch):
+    fake_ladder(monkeypatch, lambda host: True)
+    rungs = ladder.run_ladder(
+        run, run.config.profile(), run.config.target(), hosts("client1", "client2"), "192.0.2.1", "aa",
+        unavailable={"client3": "http_404_register"},
+    )  # fmt: skip
+    checks = [r.get("connection_check") for r in rungs]
+    assert [c["clients_connected"] for c in checks] == [2, 2, 2]
+    assert all(c["clients_total"] == 3 for c in checks)
+
+
+def test_report_shows_connected_clients_and_exit_slots():
+    from gvpn_bench.results.report_model import _connection_cells
+
+    check = {"clients_total": 4, "clients_connected": 2, "exit_slots_in_use": 2, "exit_slots_total": 2,
+             "probe_age_s": 12.4}  # fmt: skip
+    assert _connection_cells(check) == ["2 of 4", "2 of 2 (probe 12 s old)"]
+    assert _connection_cells({**check, "exit_slots_total": None}) == ["2 of 4", "n/a"]
+    assert _connection_cells(None) == ["n/a", "n/a"]
+
+
+def test_report_puts_the_overview_chart_first_and_shows_client_system_load():
+    from gvpn_bench.results.collection import Collection, Recording
+    from gvpn_bench.results.report_model import Chart, Heading, _concurrent, _system_cells
+    from tests.sample_result import sample_result
+
+    blocks = _concurrent(Collection("t", [Recording("r1", sample_result())]))
+    assert isinstance(blocks[0], Heading)
+    assert isinstance(blocks[1], Chart) and blocks[1].name == "overview"
+    system = {"cpu_mean_pct": 12.34, "cpu_max_pct": 40.0, "mem_available_min_mib": 6100.4, "load1_max": 1.5}
+    assert _system_cells(system) == ["12.3", "40.0", "6,100", "1.50"]
+    assert _system_cells(None) == ["n/a"] * 4

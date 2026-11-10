@@ -231,6 +231,7 @@ def test_connect_disconnects_before_connecting(tmp_path, monkeypatch):
     monkeypatch.setattr(guards, "start_heartbeat", lambda run: None)
     monkeypatch.setattr(steps, "disconnect", lambda host, profile: order.append("disconnect"))
     monkeypatch.setattr(steps, "backup_identity", lambda *a, **k: None)
+    monkeypatch.setattr(steps, "vpn_for", lambda host, profile: type("V", (), {"ctl": lambda self, *a, **k: {}})())
     monkeypatch.setattr(
         steps,
         "connect_client",
@@ -288,7 +289,7 @@ def test_ladder_pushes_unless_told_not_to(tmp_path, monkeypatch, no_push, expect
     calls = []
     monkeypatch.setattr(runcli, "load_user_config", lambda: user)
     monkeypatch.setattr(steps, "step_ladder", lambda run, profile, target: [])
-    monkeypatch.setattr(steps, "step_result", lambda run, profile, target: run.path)
+    monkeypatch.setattr(steps, "step_result", lambda run, profile, target, pass_no=None: run.path)
     monkeypatch.setattr(runcli, "auto_push", lambda run: calls.append("push"))
     runcli.cmd_ladder(argparse.Namespace(run=str(run.path), target=None, no_push=no_push))
     assert calls == expected

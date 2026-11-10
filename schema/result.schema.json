@@ -54,6 +54,38 @@
         "notes": {
           "type": "string"
         },
+        "experiment": {
+          "type": "object",
+          "required": [
+            "id",
+            "cycle",
+            "cycles",
+            "position",
+            "targets"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "cycle": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cycles": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targets": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "description": "Optional schedule identity; cycle <= cycles and position <= targets are checked by the runtime validator."
+        },
         "historical_source": {
           "type": [
             "string",
@@ -246,6 +278,72 @@
                       "null"
                     ]
                   },
+                  "architecture": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cpu_vendor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cpu_sockets": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cores_per_socket": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "threads_per_core": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "hypervisor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "root_disk_gib": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "root_free_gib": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "swap_mib": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "package_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ctl_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "kernel": {
                     "type": [
                       "string",
@@ -369,6 +467,70 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/rung"
+              }
+            },
+            "idle_ping": {
+              "type": "array",
+              "description": "Unloaded ping through each client's tunnel before rung 1, all clients at once (30 pings, 1 s apart).",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "sent": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "received": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "loss_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "min_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "mean_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "max_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "measured",
+                      "no_reply"
+                    ]
+                  }
+                },
+                "required": [
+                  "client",
+                  "sent",
+                  "received",
+                  "loss_pct",
+                  "min_ms",
+                  "mean_ms",
+                  "max_ms",
+                  "status"
+                ]
               }
             }
           },
@@ -604,6 +766,55 @@
           "status",
           "detail",
           "at"
+        ]
+      }
+    },
+    "payment": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Added after recovery: wxHOPR funded, returned and spent (decimal strings).",
+      "properties": {
+        "funded_wxHOPR": {
+          "type": "string"
+        },
+        "recovered_wxHOPR": {
+          "type": "string"
+        },
+        "spent_wxHOPR": {
+          "type": "string"
+        },
+        "pix": {
+          "type": "boolean"
+        },
+        "transferred_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "funded_wxHOPR",
+        "recovered_wxHOPR",
+        "spent_wxHOPR",
+        "pix"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Problems a reader must see first, e.g. pix_no_payment.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
         ]
       }
     }

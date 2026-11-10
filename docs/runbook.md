@@ -30,6 +30,20 @@ For `fund` and `recover`, install the extra: `pip install -e '.[remote]'`.
 
 ## 1. Plan
 
+For an exit not tested before, find the closest region first:
+
+```bash
+./gnosis_vpn-bench probe-regions --target kenya-jura-prod [--region ams3 --region fra1 ...]
+```
+
+It reads the exit's announced IPv4 address from the indexer, asks before
+creating one `s-1vcpu-512mb-10gb` droplet per region (tag
+`gvpn-bench-probe-<id>`), measures 10 pings and an `mtr` from each, then
+deletes every droplet with that tag and checks none is left, also after
+an error or Ctrl-C. Exits that ignore ICMP get the RTT of the last hop
+that answered, a lower bound for the exit. It prints the regions fastest
+first; set `region` in `run.toml` to the first one.
+
 ```bash
 ./gnosis_vpn-bench plan --profile v5-piz-palu-dev --target kaunas
 ```
@@ -45,7 +59,9 @@ spent the full 300 s per rung for the same overlap-based rate.
 Before the first droplet, `provision` (and so `execute`) checks every
 target on the network's indexer: the exit must be a registered node with
 an announced address, and for a v5 profile that discovers exits it must
-announce a `gvpn:exit` service. A failed check creates nothing.
+announce a `gvpn:exit` service. The profile's pinned package URL must
+answer HTTP 200 (apt pools drop old releases; pin the GitHub release
+asset instead). A failed check creates nothing.
 
 Connecting gives up on a client early when the exit refuses its
 registration twice (HTTP 404 on `clients/register`, i.e. no free slot),
@@ -134,7 +150,12 @@ first disconnect from any previous target, so a run can test several exits.
 
 `connect` then backs up each client's identity again, now including the
 Safe file; for a connected client a missing Safe file is an error, and a
-changed key file is always refused.
+changed key file is always refused. It also saves every client's Safe
+info, including clients the exit refused, because recovery needs it.
+
+`connect` exits 0 when at least one client connected, and says how many
+of the clients did; the ladder then runs with the connected ones. It exits
+1 only when no client connected.
 
 If the operator machine goes away, `deadman` stops the VPN after 6 min and
 reboots the VM once after 12 min.
@@ -142,7 +163,7 @@ reboots the VM once after 12 min.
 ## 5. Measure
 
 ```bash
-./gnosis_vpn-bench ladder RUN [--target NAME]   # 1 → 2 → 3 concurrent clients
+./gnosis_vpn-bench ladder RUN [--target NAME] [--passes N]   # 1 → 2 → 3 concurrent clients
 ./gnosis_vpn-bench sweep RUN        # every discovered exit once
 ./gnosis_vpn-bench --run RUN --on client1 ramp   # any local mode on a VM
 ```
@@ -152,6 +173,18 @@ reboots the VM once after 12 min.
 run's first target), then push them to the private results repo without
 asking (`--no-push` to skip). A rung whose clients are not all still
 connected is `failed`; the rungs after it are `not_run`.
+
+Before rung 1 every connected client pings the ping target 30 times
+through its tunnel with no transfer running (`concurrent.idle_ping`).
+`--passes N` runs the whole ladder N times; pass 2 onwards writes to
+`RUN/results/<target>-pass<N>/`, raw data goes to one folder per pass
+under `RUN/data/<target>/`, and the results are pushed after every pass.
+
+The run log has, per rung, `rung N: X of Y clients connected; exit slots
+a/b in use` and then one line per client, `rung N <client>: <Mbit/s>
+Mbit/s, <bytes> bytes, complete <bool>, ping <ms> ms`. Every step ends
+with `step <name> finished: exit <code>`; `step destroy finished` is a
+run's last line, where a log watcher can stop.
 
 ## 6. Recover
 
@@ -169,6 +202,15 @@ connected is `failed`; the rungs after it are `not_run`.
    wxHOPR and xDAI are returned to the funding Safe. A small gas reserve
    stays on each node; its key is backed up. The returns are audited from
    receipts into `state/cleanup.json`.
+
+A failed `balance` call (a busy worker, ctl exit 70) is retried 3 times,
+10 s apart, before recovery falls back to the saved Safe info.
+
+After the returns, `recover` adds `payment` (funded, returned and spent
+wxHOPR) to every result of the run, re-renders the reports and pushes them
+again, before any droplet is deleted. On a PIX network (v5) that carried
+traffic but spent nothing, it adds a `pix_no_payment` entry to
+`warnings`, which the report shows above everything else.
 
 An interrupted recovery can be rerun. If the journal is incomplete, steps 1
 and 2 run again (halting is safe to repeat); otherwise only step 3 runs.
@@ -191,30 +233,70 @@ are gone, and cancels the deletion timer.
 ./gnosis_vpn-bench results push RUN [RUN ...] [--title T] [--link "Claude app=https://claude.ai/artifact/…"]
 ```
 
+A push prints `App copy: <path>`: the report's self-contained
+`report.html` in the results checkout. Publish that file as it is (for
+example to the Claude app); do not edit a copy by hand, or the app page
+and the repository drift apart.
+
 The private results repository is laid out as:
 
 ```
 README.md                  index of every report and recording
-runs/<start>-<exit>-<profile>/      one recording (one run × one exit)
-reports/<run id>/                   the report of one run (updated by every push)
-reports/<start>-<exits>-<profiles>/ a report over several runs (or --report-name)
+runs/YYYY-MM-DD--HH-MM-SS/          one recording (measurement start, UTC)
+reports/YYYY-MM-DD--HH-MM-SS/       an experiment report (creation time, UTC)
 ```
 
-Each folder has `README.md` and `charts/*.svg`, which GitHub renders on
+Each folder has `README.md` and `charts/*.png`, which GitHub renders on
 the web and in its app, plus `report.html` (the same report as one page).
 Recordings also keep `result.json` and `provenance.json`.
+
+PNG publication needs `rsvg-convert` (`librsvg2-bin` on Debian/Ubuntu).
+Charts use double-size text and 2.5× the previous height, rasterized at 3×
+resolution (2700 pixels wide). Legends wrap within the image and show the
+line and marker styles; charts with more than five series vary both styles.
+Chart sources pass the credential/IP scan before conversion. A missing
+converter leaves the existing published charts intact.
+
+Each per-second download plot has two y-axes: individual client Mbit/s on
+the left and summed client Mbit/s on the right. The black dashed total
+uses samples at the same timestamp and has a gap if any client lacks a
+sample. Both axes scale independently; the per-second total is distinct
+from the ladder's overlap-averaged rate.
+
+The root README has one summary line per experiment, followed by the report
+and recording indexes. Each summary states the test scope, measured rung count,
+highest observed total throughput and failures. Missing throughput is never zero.
+Historical recordings without a measurement start use their creation timestamp;
+original IDs remain in `result.json` for provenance.
 
 Results are pushed automatically by `ladder`, `sweep` and `execute` as
 soon as they exist, before any machine is destroyed; run `results push`
 by hand only to retry or to publish several runs together. A single
-run's report is named after the run id, so later pushes update it and
+run's report is named after its creation timestamp, so later pushes update it and
 keep links attached with `results link`. A push of several runs gets a
-new report each time unless you pass the same `--report-name`.
+report named after the earliest creation timestamp; `--report-name` overrides it.
+
+Existing recordings are matched by their source identity before publication,
+so a later push updates a renamed archive rather than recreating its old folder.
+Live multi-cycle experiments retain their distinct stable slot names while pending;
+the completed archive can use timestamp-only names once recording starts are known.
 
 `results push` adds the given runs' recordings and one report over all of
 them: one line per exit in the overview chart, and error bars (min to max
 around the mean) where the same exit, network, profile and client package
-were recorded more than once. Other commands:
+were recorded more than once with matching measurement settings and origin
+region. Different settings remain separate series.
+
+For recordings with experiment metadata, the report has a schedule matrix in
+cycle and exit order. Each recording shows its own ladder totals, overlap,
+start skew, actual gaps and reconnect notes before the per-client details.
+The machine inventory lists every origin and client, including CPU model and
+topology, RAM, architecture, virtualization, root filesystem capacity, OS,
+kernel and installed client versions. Older recordings show `n/a` for facts
+that were not collected. The result contract defines the optional
+[`run.experiment` and machine fields](result-schema.md).
+
+Other commands:
 
 ```bash
 ./gnosis_vpn-bench results combine REC1 REC2 ... [--title T]   # report over recordings already in the repo

@@ -1,0 +1,5 @@
+label = "UK"
+exit_address = "0xcd9d0e23cd999dfc0d1400d837f8e612dbbbdfaa"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "London"

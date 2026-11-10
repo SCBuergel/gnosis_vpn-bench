@@ -27,6 +27,7 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -84,18 +85,30 @@ def scan_files(files: list[Path], vm_ips: set[str]) -> ScanResult:
     return result
 
 
-def destination_name(result: dict[str, Any]) -> str:
-    """``<YYYY-MM-DD>-<HHMMSS>Z-<target>-<profile>``: unique per run start.
+def timestamp_name(when: str) -> str:
+    """A UTC timestamp shared by published recording and experiment folder names."""
+    instant = datetime.fromisoformat(when.replace("Z", "+00:00"))
+    if instant.tzinfo is None:
+        raise ValueError("result timestamps must include a timezone")
+    return instant.astimezone(UTC).strftime("%Y-%m-%d--%H-%M-%S")
 
-    The time (UTC, to the second) keeps two runs of the same target and
-    profile on one day in separate folders.
+
+def destination_name(result: dict[str, Any]) -> str:
+    """Timestamp-only names for ordinary recordings; stable slots for live experiments.
+
+    Ordinary recordings use the start time. Experiment recordings use the
+    creation time and cycle suffix so pending results can be updated in place.
     """
     run = result["run"]
-    when = run.get("started_at") or run["created_at"]
+    if not run.get("experiment"):
+        return timestamp_name(run.get("started_at") or run["created_at"])
+    when = run["created_at"] if run.get("experiment") else run.get("started_at") or run["created_at"]
     stamp = f"{when[:10]}-{when[11:13]}{when[14:16]}{when[17:19]}Z"
     target = result["provenance"]["target"]["name"]
     profile = result["provenance"]["profile"]["name"]
     name = f"{stamp}-{target}-{profile}"
+    if run.get("experiment"):
+        name += f"-cycle{run['experiment']['cycle']}"
     if run["id"].startswith("hist-"):
         name += "-historical"
     return name

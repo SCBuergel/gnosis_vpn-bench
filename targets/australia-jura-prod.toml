@@ -1,0 +1,5 @@
+label = "Australia"
+exit_address = "0x64885d2d2bc9df7b415aac184e020c632d715dff"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Sydney"

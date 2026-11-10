@@ -1,0 +1,5 @@
+label = "Brazil"
+exit_address = "0x12b78461da59e8317c61bd249ea0dea2aa9527de"
+network = "jura-prod"
+profile = "v4-jura-prod"
+location = "Sao Paulo"
