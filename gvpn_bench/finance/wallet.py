@@ -107,11 +107,35 @@ def load_funding_source(path: Path) -> FundingSource:
     return FundingSource(account=account, safe=web3.Web3.to_checksum_address(fields["safe"]))
 
 
+# Read-only calls are retried with backoff when the public RPC rate-limits
+# (HTTP 429). Sending and signing are never retried here: a send without a
+# receipt goes through the Journal's ambiguity handling instead.
+NOT_RETRIED = ("eth_sendRawTransaction", "eth_sendTransaction", "eth_sign", "eth_signTypedData")
+RPC_RETRIES = 7
+RPC_BACKOFF_S = 1.0
+
+
+def read_retry_configuration() -> Any:
+    import requests
+    from web3.providers.rpc.utils import REQUEST_RETRY_ALLOWLIST, ExceptionRetryConfiguration
+
+    allowed = [method for method in REQUEST_RETRY_ALLOWLIST if method not in NOT_RETRIED]
+    return ExceptionRetryConfiguration(
+        errors=(ConnectionError, requests.HTTPError, requests.Timeout),
+        retries=RPC_RETRIES,
+        backoff_factor=RPC_BACKOFF_S,
+        method_allowlist=allowed,
+    )
+
+
 def connect_chain(rpc_url: str = RPC_URL) -> Any:
     web3 = require_web3()
     from web3.middleware import ExtraDataToPOAMiddleware
 
-    w3 = web3.Web3(web3.Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 45}))
+    provider = web3.Web3.HTTPProvider(
+        rpc_url, request_kwargs={"timeout": 45}, exception_retry_configuration=read_retry_configuration()
+    )
+    w3 = web3.Web3(provider)
     w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     if w3.eth.chain_id != 100:
         raise RuntimeError("RPC is not Gnosis Chain")
