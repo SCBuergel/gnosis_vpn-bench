@@ -88,19 +88,31 @@ def cmd_status(args: argparse.Namespace) -> int:
         from .finance.wallet import Journal
 
         recovered = _read_state(run, "cleanup.json")
-        confirmed = {e["purpose"] for e in Journal(run).entries() if e.get("status") == "confirmed"}
-        print("Funds (sent = confirmed in the transaction journal):")
+        entries = Journal(run).entries()
+        confirmed = {e["purpose"] for e in entries if e.get("status") == "confirmed"}
+        # Broadcast without a receipt yet (pending) or not found (dropped) may still have
+        # moved funds; teardown (steps.funds_sent) treats them as sent, and so does this.
+        open_ = {e["purpose"] for e in entries if e.get("status") in ("pending", "dropped")} - confirmed
+        print("Funds (from the transaction journal):")
         any_sent = False
+        any_open = False
         for node in funding:
             amounts = f"{node['wxhopr']} wxHOPR + {node['xdai']} xDAI to {node['address']}"
-            sent = [asset for asset in ("wxhopr", "xdai") if f"fund:{node['name']}:{asset}" in confirmed]
-            any_sent |= bool(sent)
+            purposes = {asset: f"fund:{node['name']}:{asset}" for asset in ("wxhopr", "xdai")}
+            sent = [asset for asset, purpose in purposes.items() if purpose in confirmed]
+            unconfirmed = [asset for asset, purpose in purposes.items() if purpose in open_]
+            any_sent |= bool(sent or unconfirmed)
+            any_open |= bool(unconfirmed)
             if len(sent) == 2:
                 print(f"  {node['name']}: sent {amounts}")
-            elif sent:
-                print(f"  {node['name']}: PARTLY sent ({', '.join(sent)} confirmed) of {amounts}")
+            elif sent or unconfirmed:
+                parts = [f"{', '.join(sent)} confirmed"] if sent else []
+                parts += [f"{', '.join(unconfirmed)} sent, receipt pending (reconcile)"] if unconfirmed else []
+                print(f"  {node['name']}: PARTLY sent ({'; '.join(parts)}) of {amounts}")
             else:
                 print(f"  {node['name']}: planned, not sent: {amounts}")
+        if any_open:
+            print("  UNCONFIRMED transfers: look them up before anything else; `fund` and `recover` reconcile them")
         if recovered:
             print(
                 f"  recovered {recovered.get('recovered_wxHOPR')} wxHOPR, "
@@ -165,7 +177,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         print(f"{label:<17}: {path}  {'ok' if not problems else '; '.join(problems)}")
         status |= bool(problems)
     web3_ok = web3_available()
-    hint = "ok" if web3_ok else "MISSING (fund and recover need it): pip install -e '.[remote]'"
+    hint = "ok" if web3_ok else "MISSING (funding pre-flight, fund and recover need it): pip install -e '.[remote]'"
     print(f"web3             : {hint}  ({sys.executable})")
     status |= not web3_ok
     print(f"profiles         : {', '.join(list_names(CONFIG_ROOT / 'profiles'))}")
@@ -523,7 +535,7 @@ def _teardown(user: Any, run: Run, profile: Any) -> bool:
             steps.step_destroy(user, run, profile)
             print("All droplets of this run are deleted (verified with the API).")
         return True
-    except (Exception, KeyboardInterrupt) as error:  # report loudly; the deletion timer is still armed
+    except (Exception, KeyboardInterrupt, SystemExit) as error:  # report loudly; the deletion timer is still armed
         timer = run.state / "deadline-timer.json"
         print(f"TEARDOWN FAILED: {type(error).__name__}: {error}")
         if timer.exists():

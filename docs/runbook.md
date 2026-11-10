@@ -26,7 +26,9 @@ Check with `./gnosis_vpn-bench config`. It warns about credential files
 that group or others can read; fix them with `chmod 600`. The tool never
 moves them.
 
-For `fund` and `recover`, install the extra into the checkout's `.venv`:
+`fund` and `recover` need web3, and so do `provision` and `execute` for a
+profile with a `[funding]` estimate (their pre-flight reads the funding
+Safe's balance). Install the extra into the checkout's `.venv`:
 `python3 -m venv .venv && .venv/bin/pip install -e '.[remote]'`. The
 launcher re-executes itself with `.venv/bin/python` when that exists
 (`GVPN_BENCH_NO_VENV=1` opts out), and `config` fails with
@@ -337,8 +339,10 @@ It never creates the results repository; create it on GitHub as
 ```
 
 Shows the steps done, the droplets from the inventory, and where the funds
-are. "sent" means confirmed in the transaction journal; a planned transfer
-that was never confirmed shows as "planned, not sent" (or "PARTLY sent").
+are, from the transaction journal: "sent" is confirmed; a transfer that was
+broadcast without a receipt yet (or not found) shows as "sent, receipt
+pending (reconcile)" and counts as sent, as it does for teardown; a planned
+transfer with no journal entry shows as "planned, not sent".
 
 ## Historical results
 

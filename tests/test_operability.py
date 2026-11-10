@@ -128,9 +128,24 @@ def test_status_reports_planned_funding_as_not_sent(planned, capsys):
     )
     runcli.cmd_status(argparse.Namespace(run="o1"))
     out = capsys.readouterr().out
-    assert "client1: PARTLY sent (wxhopr confirmed)" in out
+    assert "client1: PARTLY sent (wxhopr confirmed; xdai sent, receipt pending (reconcile))" in out
     assert "client2: planned, not sent" in out
+    assert "UNCONFIRMED transfers" in out
     assert "NOT recovered yet" in out
+
+
+def test_status_counts_an_unconfirmed_transfer_as_possibly_sent(planned, capsys):
+    _user, run = planned
+    write_private_json(run.state / "funding.json", nodes())
+    (run.state / "transactions.jsonl").write_text(
+        json.dumps({"purpose": "fund:client2:wxhopr", "status": "dropped"}) + "\n"
+    )
+    runcli.cmd_status(argparse.Namespace(run="o1"))
+    out = capsys.readouterr().out
+    assert "client2: PARTLY sent (wxhopr sent, receipt pending (reconcile))" in out
+    assert "nothing sent yet" not in out
+    assert "NOT recovered yet" in out
+    assert steps.funds_sent(run)  # teardown agrees: recovery is needed
 
 
 def test_status_without_a_journal_says_nothing_was_sent(planned, capsys):
@@ -141,6 +156,24 @@ def test_status_without_a_journal_says_nothing_was_sent(planned, capsys):
     assert "client1: planned, not sent" in out
     assert "nothing sent yet" in out
     assert ": sent " not in out
+
+
+# -- teardown ------------------------------------------------------------------------------
+
+
+def test_teardown_reports_a_step_that_exits(planned, monkeypatch, capsys):
+    from gvpn_bench.finance import recover
+
+    _user, run = planned
+
+    def exits(*args, **kwargs):
+        raise SystemExit("funding and recovery need web3")
+
+    monkeypatch.setattr(steps, "funds_sent", lambda run: True)
+    monkeypatch.setattr(recover, "recovery_complete", lambda *args: False)
+    monkeypatch.setattr(steps, "step_recover_initiate", exits)
+    assert runcli._teardown(None, run, None) is False
+    assert "TEARDOWN FAILED: SystemExit: funding and recovery need web3" in capsys.readouterr().out
 
 
 # -- funding capacity --------------------------------------------------------------------
@@ -199,6 +232,15 @@ class FakeAccountApi(Api):
 def test_droplet_headroom():
     assert FakeAccountApi(limit=25, existing=4).droplet_headroom() == 21
     assert FakeAccountApi(limit=None, existing=4).droplet_headroom() is None
+
+
+def test_droplet_headroom_does_not_hide_an_invalid_token():
+    class BadToken(FakeAccountApi):
+        def request(self, method, path, body=None):
+            raise ApiError(401, "Unable to authenticate you")
+
+    with pytest.raises(ApiError):
+        BadToken(limit=1, existing=0).droplet_headroom()
 
 
 def test_capacity_preflight_refuses_too_few_droplets(planned, monkeypatch):

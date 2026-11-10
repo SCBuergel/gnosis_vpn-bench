@@ -101,7 +101,7 @@ class Api:
         try:
             limit = int(self.request("GET", "account")["account"]["droplet_limit"])
         except ApiError as error:
-            if error.status in (401, 403):
+            if error.status == 403:  # a token scoped without account access; 401 (bad token) raises
                 return None
             raise
         existing = int(self.request("GET", "droplets?per_page=1")["meta"]["total"])
