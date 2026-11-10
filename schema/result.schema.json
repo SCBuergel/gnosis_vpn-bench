@@ -988,6 +988,51 @@
                   },
                   "rtt_ms": {
                     "type": "array"
+                  },
+                  "cpu_pct": {
+                    "type": "array",
+                    "description": "Optional; per second, when host samples exist."
+                  },
+                  "mem_available_mib": {
+                    "type": "array",
+                    "description": "Optional; per second, when host samples exist."
+                  },
+                  "load1": {
+                    "type": "array",
+                    "description": "Optional; per second, when host samples exist."
+                  }
+                }
+              },
+              "system": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Client host load during its transfer; null with fewer than 2 samples.",
+                "properties": {
+                  "cpu_mean_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cpu_max_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "mem_available_min_mib": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "load1_max": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
                   }
                 }
               }
@@ -1008,6 +1053,57 @@
         "detail": {
           "type": "string",
           "description": "Why an unmeasured rung has no data (optional)."
+        },
+        "connection_check": {
+          "type": "object",
+          "description": "Taken right before the rung; absent for not_run rungs and older results.",
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "clients_total": {
+              "type": "integer"
+            },
+            "clients_connected": {
+              "type": "integer"
+            },
+            "connected": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "exit_slots_total": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "exit_slots_in_use": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "exit_slots_free": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "probe_age_s": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "at",
+            "clients_total",
+            "clients_connected",
+            "connected"
+          ]
         }
       },
       "required": [

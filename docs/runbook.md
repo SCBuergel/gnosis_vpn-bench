@@ -39,10 +39,12 @@ For an exit not tested before, find the closest region first:
 It reads the exit's announced IPv4 address from the indexer, asks before
 creating one `s-1vcpu-512mb-10gb` droplet per region (tag
 `gvpn-bench-probe-<id>`), measures 10 pings and an `mtr` from each, then
-deletes every droplet with that tag and checks none is left, also after
-an error or Ctrl-C. Exits that ignore ICMP get the RTT of the last hop
-that answered, a lower bound for the exit. It prints the regions fastest
-first; set `region` in `run.toml` to the first one.
+deletes every droplet with that tag (also one whose create call failed)
+and checks none is left, on every path including an error or Ctrl-C;
+leftovers are logged as `PROBE DROPLETS NOT DELETED`. Exits that ignore
+ICMP get the RTT of the last hop that answered, a lower bound for the
+exit. It prints the regions fastest first; set `region` in `run.toml` to
+the first one.
 
 ```bash
 ./gnosis_vpn-bench plan --profile v5-piz-palu-dev --target kaunas
@@ -183,8 +185,10 @@ under `RUN/data/<target>/`, and the results are pushed after every pass.
 The run log has, per rung, `rung N: X of Y clients connected; exit slots
 a/b in use` and then one line per client, `rung N <client>: <Mbit/s>
 Mbit/s, <bytes> bytes, complete <bool>, ping <ms> ms`. Every step ends
-with `step <name> finished: exit <code>`; `step destroy finished` is a
-run's last line, where a log watcher can stop.
+with `step <name> finished: exit <code>`. A run's last line is `step
+destroy finished` when the steps run one by one, and `step execute
+finished` for `execute` (which recovers and destroys inside itself); a
+log watcher can stop at either.
 
 ## 6. Recover
 

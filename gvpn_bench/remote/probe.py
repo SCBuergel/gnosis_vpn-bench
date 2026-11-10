@@ -191,14 +191,44 @@ def probe_regions(
         ips = wait_for_ips(api, ids, boot_timeout_s, poll_s)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(ips))) as pool:
             futures = {r: pool.submit(measure, host_factory(r, ip), r, target_ip) for r, ip in ips.items()}
-        results = [
-            futures[r].result() if r in futures else RegionRtt(r, None, None, None, "unreachable") for r in regions
-        ]
+        results = [_result(futures.get(r), r) for r in regions]
     finally:
-        for region, droplet_id in ids.items():
-            try:
-                api.delete_droplet(droplet_id, tag)
-            except Exception as error:  # keep deleting the others; reported via the leftover check
-                log.error("probe droplet %s (%s) not deleted: %s", droplet_id, region, error)
-        left = _leftovers(api, tag, poll_s) if ids else []
+        left = delete_probes(api, tag, ids, poll_s)
     return sorted(results, key=lambda r: (r.rtt_ms is None, r.rtt_ms or 0)), left
+
+
+def _result(future: concurrent.futures.Future[RegionRtt] | None, region: str) -> RegionRtt:
+    """One region's measurement; a region that failed does not lose the others."""
+    if future is None:
+        return RegionRtt(region, None, None, None, "unreachable")
+    try:
+        return future.result()
+    except Exception as error:
+        log.error("probe %s failed: %s", region, error)
+        return RegionRtt(region, None, None, None, "unreachable")
+
+
+def delete_probes(api: ProbeApi, tag: str, ids: dict[str, int], poll_s: float) -> list[int]:
+    """Delete every droplet carrying *tag*, also ones created but never recorded; return what is left.
+
+    Runs on every path, also after an error or Ctrl-C, and logs any leftover
+    loudly: probe droplets have no deletion timer.
+    """
+    known = set(ids.values())
+    try:
+        known |= {d["id"] for d in api.droplets_with_tag(tag)}
+    except Exception as error:
+        log.error("cannot list probe droplets tagged %s: %s", tag, error)
+    for droplet_id in sorted(known):
+        try:
+            api.delete_droplet(droplet_id, tag)
+        except Exception as error:  # keep deleting the others; reported via the leftover check
+            log.error("probe droplet %s not deleted: %s", droplet_id, error)
+    try:
+        left = _leftovers(api, tag, poll_s)
+    except Exception as error:
+        log.error("cannot verify probe droplets tagged %s are gone: %s", tag, error)
+        left = sorted(known)
+    if left:
+        log.error("PROBE DROPLETS NOT DELETED: %s (tag %s); delete them in the DigitalOcean console", left, tag)
+    return left

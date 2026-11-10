@@ -188,16 +188,16 @@ def test_push_prints_the_app_copy(tmp_path, capsys):
 MTR_AMS3 = """== ping
 10 packets transmitted, 0 received, 100% packet loss, time 9231ms
 == mtr
-  6.|-- 154.66.247.89    0.0%     5   89.1  85.9  84.7  89.1   1.8
-  9.|-- 102.134.23.61   20.0%     5  128.0 128.2 127.9 128.7   0.4
- 10.|-- 10.65.169.242    0.0%     5  134.3 134.7 134.3 135.8   0.6
+  6.|-- 203.0.113.89    0.0%     5   89.1  85.9  84.7  89.1   1.8
+  9.|-- 203.0.113.61   20.0%     5  128.0 128.2 127.9 128.7   0.4
+ 10.|-- 198.51.100.242    0.0%     5  134.3 134.7 134.3 135.8   0.6
  11.|-- ???             100.0     5    0.0   0.0   0.0   0.0   0.0
 """
 
 
 def test_parse_rtt_uses_the_last_responding_hop_or_the_ping():
     row = probe.parse_rtt("ams3", MTR_AMS3)
-    assert (row.rtt_ms, row.rtt_source, row.hop, row.status) == (134.7, "last_hop", "10.65.169.242", "measured")
+    assert (row.rtt_ms, row.rtt_source, row.hop, row.status) == (134.7, "last_hop", "198.51.100.242", "measured")
     direct = probe.parse_rtt("fra1", "== ping\n" + PING_OK + "== mtr\n")
     assert (direct.rtt_ms, direct.rtt_source) == (253.495, "ping")
     assert probe.parse_rtt("x", "== ping\n== mtr\n").status == "no_reply"
@@ -205,11 +205,16 @@ def test_parse_rtt_uses_the_last_responding_hop_or_the_ping():
 
 def test_exit_ip_takes_the_announced_public_ipv4(tmp_path, run):
     def query(indexer, text):
-        addresses = ["/ip4/10.0.0.1/udp/9091/quic-v1", "/ip4/41.90.178.2/udp/9091/quic-v1"]
+        # A private and a documentation address are skipped; 9.9.9.9 stands in for a public one.
+        addresses = [
+            "/ip4/10.0.0.1/udp/9091/quic-v1",
+            "/ip4/192.0.2.178/udp/9091/quic-v1",
+            "/ip4/9.9.9.9/udp/9091/quic-v1",
+        ]
         accounts = [{"chainKey": "x", "multiAddresses": addresses}]
         return {"data": {"accounts": {"__typename": "AccountsList", "accounts": accounts}}}
 
-    assert probe.exit_ip(run.config.target(), query) == "41.90.178.2"
+    assert probe.exit_ip(run.config.target(), query) == "9.9.9.9"
 
 
 class FakeApi:
@@ -244,7 +249,7 @@ def test_probe_regions_ranks_and_deletes_every_droplet(tmp_path, monkeypatch):
     def host(region, ip):
         return FakeHost(lambda argv, data: ok(answers[region]), name=region)
 
-    results, left = probe.probe_regions(api, "41.90.178.2", ["fra1", "ams3"], "t", tmp_path, host_factory=host)
+    results, left = probe.probe_regions(api, "192.0.2.178", ["fra1", "ams3"], "t", tmp_path, host_factory=host)
     assert [r.region for r in results] == ["ams3", "fra1"] and left == [] and api.droplets == {}
 
 
@@ -256,7 +261,7 @@ def test_probe_regions_deletes_droplets_after_an_error(tmp_path, monkeypatch):
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        probe.probe_regions(api, "41.90.178.2", ["ams3", "lon1"], "t", tmp_path, host_factory=host)
+        probe.probe_regions(api, "192.0.2.178", ["ams3", "lon1"], "t", tmp_path, host_factory=host)
     assert api.droplets == {}
 
 
@@ -265,3 +270,39 @@ def _fake_key(directory):
     key.write_text("private")
     key.with_suffix(".pub").write_text("ssh-ed25519 AAAA test")
     return key
+
+
+def test_probe_regions_deletes_a_droplet_whose_create_call_raised(tmp_path, monkeypatch):
+    monkeypatch.setattr(probe, "make_key", lambda d: _fake_key(tmp_path))
+    api = FakeApi()
+    create = api.create_droplet
+
+    def flaky_create(**kwargs):
+        droplet = create(**kwargs)
+        if droplet["id"] == 2:
+            raise TimeoutError("created on the API, but the answer was lost")
+        return droplet
+
+    api.create_droplet = flaky_create
+    with pytest.raises(TimeoutError):
+        probe.probe_regions(api, "192.0.2.178", ["ams3", "lon1"], "t", tmp_path, host_factory=None, poll_s=0)
+    assert api.droplets == {}
+
+
+def test_one_failing_region_keeps_the_others(tmp_path, monkeypatch):
+    monkeypatch.setattr(probe, "make_key", lambda d: _fake_key(tmp_path))
+    api = FakeApi()
+
+    def answer(region):
+        def respond(argv, data):
+            if region == "lon1":
+                raise TimeoutError("ssh hung")
+            return ok(MTR_AMS3)
+
+        return respond
+
+    results, left = probe.probe_regions(
+        api, "192.0.2.178", ["ams3", "lon1"], "t", tmp_path, host_factory=lambda r, ip: FakeHost(answer(r), name=r)
+    )
+    assert [(r.region, r.status) for r in results] == [("ams3", "measured"), ("lon1", "unreachable")]
+    assert left == [] and api.droplets == {}
